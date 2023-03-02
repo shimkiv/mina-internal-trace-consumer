@@ -1,0 +1,34 @@
+(rule
+ (targets assets.ml)
+ (deps
+  (source_tree assets))
+ (action
+  (run %{bin:ocaml-crunch} -m plain assets -o assets.ml)))
+
+(executable
+ (name internal_tracing_processor)
+ (libraries
+  ;; opam libraries
+  base
+  base.base_internalhash_types
+  core
+  core_kernel
+  core_unix
+  sexplib0
+  yojson
+  stdio
+  astring
+  async
+  async_unix
+  async_kernel
+  async.async_command
+  graphql
+  graphql-async
+  graphql_parser
+  cohttp
+  graphql-cohttp
+  cohttp-async
+  uri)
+ (preprocess
+  (pps ppx_jane ppx_deriving_yojson))
+ (modes native))
