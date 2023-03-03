@@ -35,14 +35,6 @@ This will expose a GraphQL server in `http://localhost:9000/graphql`.
 
 ### Building
 
-First build the builder image:
-
-```
-docker build . -f build.Dockerfile -t internal-trace-consumer:build
-```
-
-once it is ready, the final image can be built with:
-
 ```
 docker build . -t internal-trace-consumer:latest
 ```
