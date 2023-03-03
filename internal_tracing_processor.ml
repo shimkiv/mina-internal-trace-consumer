@@ -98,7 +98,7 @@ let run =
            Graphql_server.create_graphql_server
              ~bind_to_address:
                Tcp.Bind_to_address.(
-                 if insecure_rest_server then All_addresses else Localhost)
+                 if insecure_rest_server then All_addresses else Localhost )
              ~schema:Graphql_server.schema ~server_description:"GraphQL server"
              port
          in
