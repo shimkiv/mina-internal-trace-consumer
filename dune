@@ -6,7 +6,7 @@
   (run %{bin:ocaml-crunch} -m plain assets -o assets.ml)))
 
 (executable
- (name internal_tracing_processor)
+ (name internal_trace_consumer)
  (libraries
   ;; opam libraries
   base
