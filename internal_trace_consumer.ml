@@ -76,12 +76,25 @@ let rec process_reader ~rotated reader =
 
 let process_file filename =
   let rec loop rotated =
-    let%bind () = Reader.with_file filename ~f:(process_reader ~rotated) in
-    printf "File rotated, re-opening...\n%!" ;
-    let%bind () = Clock.after (Time.Span.of_sec 2.0) in
-    (* TODO: take rotate end timestamp, and rotate start timestamp of new file and make
-       sure it is increasing *)
-    loop true
+    let%bind result =
+      try_with (fun () ->
+          Reader.with_file filename ~f:(process_reader ~rotated) )
+    in
+    match result with
+    | Ok () ->
+        printf "File rotated, re-opening...\n%!" ;
+        let%bind () = Clock.after (Time.Span.of_sec 2.0) in
+        (* TODO: take rotate end timestamp, and rotate start timestamp of new file and make
+           sure it is increasing *)
+        loop true
+    | Error exn ->
+        eprintf
+          "File '%s' could not be opened, retrying after 5 seconds. Reason:\n\
+           %s\n\
+           %!"
+          filename (Exn.to_string exn) ;
+        let%bind () = Clock.after (Time.Span.of_sec 5.0) in
+        loop rotated
   in
   loop false
 
@@ -94,6 +107,7 @@ let run =
     (Command.Param.map2 filename_param port_param ~f:(fun filename port () ->
          let%bind () = Deferred.return () in
          let insecure_rest_server = true in
+         printf "Starting server on port %d...\n%!" port ;
          let%bind _ =
            Graphql_server.create_graphql_server
              ~bind_to_address:
@@ -103,7 +117,6 @@ let run =
              port
          in
          printf "Consuming events from file: %s\n%!" filename ;
-         printf "Starting server on port %d...\n%!" port ;
          let%bind () = process_file filename in
          printf "Done\n%!" ; Deferred.unit ) )
 
