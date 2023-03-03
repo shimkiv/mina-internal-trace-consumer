@@ -21,8 +21,8 @@ FROM ${BASE_IMAGE}:${BASE_IMAGE_VERSION}
 
 COPY --from=builder /src/code/_build/default/src/internal_trace_consumer.exe /internal_trace_consumer.exe
 
-EXPOSE 80
+EXPOSE 9080
 
 ENTRYPOINT [ "/internal_trace_consumer.exe" ]
 
-CMD [ "run", "/traces/internal-trace.jsonl", "80" ]
+CMD [ "serve", "--trace-file", "/traces/internal-trace.jsonl", "--port", "9080" ]

@@ -96,29 +96,32 @@ let process_file filename =
   in
   loop false
 
-let filename_param = Command.Param.(anon ("filename" %: string))
+let serve =
+  Command.async ~summary:"Internal trace processor with GraphQL server"
+    (let%map_open.Command port =
+       flag "--port" ~aliases:[ "port" ]
+         (optional_with_default 9080 int)
+         ~doc:"Port for GraphQL server to listen on (default 9080)"
+     and filename =
+       flag "--trace-file" ~aliases:[ "trace-file" ] (required string)
+         ~doc:"Parth to internal trace file"
+     in
+     fun () ->
+       let insecure_rest_server = true in
+       printf "Starting server on port %d...\n%!" port ;
+       let%bind _ =
+         Graphql_server.create_graphql_server
+           ~bind_to_address:
+             Tcp.Bind_to_address.(
+               if insecure_rest_server then All_addresses else Localhost )
+           ~schema:Graphql_server.schema ~server_description:"GraphQL server"
+           port
+       in
+       printf "Consuming events from file: %s\n%!" filename ;
+       let%bind () = process_file filename in
+       printf "Done\n%!" ; Deferred.unit )
 
-let port_param = Command.Param.(anon ("filename" %: int))
-
-let run =
-  Command.async ~summary:"Internal trace processor"
-    (Command.Param.map2 filename_param port_param ~f:(fun filename port () ->
-         let%bind () = Deferred.return () in
-         let insecure_rest_server = true in
-         printf "Starting server on port %d...\n%!" port ;
-         let%bind _ =
-           Graphql_server.create_graphql_server
-             ~bind_to_address:
-               Tcp.Bind_to_address.(
-                 if insecure_rest_server then All_addresses else Localhost )
-             ~schema:Graphql_server.schema ~server_description:"GraphQL server"
-             port
-         in
-         printf "Consuming events from file: %s\n%!" filename ;
-         let%bind () = process_file filename in
-         printf "Done\n%!" ; Deferred.unit ) )
-
-let commands = [ ("run", run) ]
+let commands = [ ("serve", serve) ]
 
 let () =
   Async.Signal.handle [ Async.Signal.term; Async.Signal.int ] ~f:(fun _ ->

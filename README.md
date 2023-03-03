@@ -13,23 +13,20 @@ dune build src/internal_trace_consumer.exe
 ## Usage
 
 ```
-# internal_trace_consumer.exe run <trace-file> <port>
-./_build/default/src/internal_trace_consumer.exe run \
-  /path/to/internal_trace.jsonl \
-  9000
+./_build/default/src/internal_trace_consumer.exe serve \
+  --trace-file /path/to/internal_trace.jsonl
 ```
 
 or
 
 ```
-dune exec ./src/internal_trace_consumer.exe run\
-  /path/to/internal_trace.jsonl \
-  9000
+dune exec ./src/internal_trace_consumer.exe serve \
+  --trace-file /path/to/internal_trace.jsonl
 ```
 
 which will rebuild the program before executing it.
 
-This will expose a GraphQL server in `http://localhost:9000/graphql`.
+This will expose a GraphQL server in `http://localhost:9080/graphql`.
 
 ## Docker images
 
@@ -45,9 +42,9 @@ Assuming the main trace file is in `path/to/internal-traces/internal-trace.jsonl
 
 ```
 docker run \
-  -p 9000:80 \
+  -p 9080:9080 \
   -v path/to/internal-traces:/traces \
   internal-trace-consumer:latest
 ```
 
-will run the internal trace consumer and expose the GraphQL server in `http://localhost:9000/graphql`.
+will run the internal trace consumer and expose the GraphQL server in `http://localhost:9080/graphql`.

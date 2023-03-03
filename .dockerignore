@@ -6,3 +6,7 @@
 **/*.orig
 **/*.merlin
 **/*.cap
+**/Dockerfile
+**/build.Dockerfile
+**/.dockerignore
+**/.gitignore
