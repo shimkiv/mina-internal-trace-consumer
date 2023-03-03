@@ -4,22 +4,25 @@ ARG BUILD_IMAGE=ocaml/opam
 ARG BUILD_IMAGE_VERSION=alpine-3.17-ocaml-4.14
 ## The above default works if the built machine doesn't change and keeps layers cached.
 ## Alternatively, `build.Dockerfile` can be used to prepare a builder image to use as a base.
+## docker build . -t internal-trace-consumer:build --target builder
 # ARG BUILD_IMAGE=internal-trace-consumer
 # ARG BUILD_IMAGE_VERSION=build
 
-FROM ${BUILD_IMAGE}:${BUILD_IMAGE_VERSION} as builder
+FROM ${BUILD_IMAGE}:${BUILD_IMAGE_VERSION} AS builder
 
 RUN sudo apk add linux-headers
 COPY --chown=opam opam.export .
 RUN opam switch import --unlock-base opam.export
 
+FROM builder AS intermediate
+
 WORKDIR /src
 COPY --chown=opam:opam . /src/code
 RUN cd /src/code && opam exec -- dune build src/internal_trace_consumer.exe
 
-FROM ${BASE_IMAGE}:${BASE_IMAGE_VERSION}
+FROM ${BASE_IMAGE}:${BASE_IMAGE_VERSION} AS app
 
-COPY --from=builder /src/code/_build/default/src/internal_trace_consumer.exe /internal_trace_consumer.exe
+COPY --from=intermediate /src/code/_build/default/src/internal_trace_consumer.exe /internal_trace_consumer.exe
 
 EXPOSE 9080
 
