@@ -7,11 +7,11 @@ FROM ${BUILD_IMAGE}:${BUILD_IMAGE_VERSION} as builder
 
 WORKDIR /src
 COPY --chown=opam:opam . /src/code
-RUN cd /src/code && opam exec -- dune build internal_trace_consumer.exe
+RUN cd /src/code && opam exec -- dune build src/internal_trace_consumer.exe
 
 FROM ${BASE_IMAGE}:${BASE_IMAGE_VERSION}
 
-COPY --from=builder /src/code/_build/default/internal_trace_consumer.exe /internal_trace_consumer.exe
+COPY --from=builder /src/code/_build/default/src/internal_trace_consumer.exe /internal_trace_consumer.exe
 
 EXPOSE 80
 
