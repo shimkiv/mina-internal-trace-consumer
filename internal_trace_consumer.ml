@@ -84,8 +84,6 @@ let process_file filename =
     | Ok () ->
         printf "File rotated, re-opening...\n%!" ;
         let%bind () = Clock.after (Time.Span.of_sec 2.0) in
-        (* TODO: take rotate end timestamp, and rotate start timestamp of new file and make
-           sure it is increasing *)
         loop true
     | Error exn ->
         eprintf
