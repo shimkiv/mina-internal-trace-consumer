@@ -105,7 +105,7 @@ let run =
          printf "Consuming events from file: %s\n%!" filename ;
          printf "Starting server on port %d...\n%!" port ;
          let%bind () = process_file filename in
-         printf "Done\n%!" ; Async.never () ) )
+         printf "Done\n%!" ; Deferred.unit ) )
 
 let commands = [ ("run", run) ]
 
