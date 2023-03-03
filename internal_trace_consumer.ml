@@ -121,6 +121,9 @@ let run =
 let commands = [ ("run", run) ]
 
 let () =
+  Async.Signal.handle [ Async.Signal.term; Async.Signal.int ] ~f:(fun _ ->
+      Core.print_endline "SIGTERM/SIGINT received, exiting" ;
+      Core.exit 0 ) ;
   Command.run
     (Command.group ~summary:"Internal trace processor"
        ~preserve_subcommand_order:() commands ) ;
