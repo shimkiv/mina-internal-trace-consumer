@@ -63,28 +63,68 @@ let process_line ~rotated line =
     eprintf "[ERROR] could not parse line: %s\n%!" line ;
     true
 
-let rec process_reader ~rotated reader =
+let file_changed inode filename =
+  try
+    let stat = Core.Unix.stat filename in
+    inode <> stat.st_ino
+  with Unix.Unix_error _ ->
+    eprintf "File '%s' removed\n%!" filename ;
+    true
+
+let really_read_line ~inode ~filename ~wait_time reader =
+  let pending = ref "" in
+  let rec loop () =
+    let%bind result = Reader.read_until reader (`Char '\n') ~keep_delim:false in
+    match result with
+    | `Eof ->
+        if file_changed inode filename then return `File_changed
+        else
+          let%bind () = Clock.after wait_time in
+          loop ()
+    | `Eof_without_delim data ->
+        pending := !pending ^ data ;
+        let%bind () = Clock.after wait_time in
+        loop ()
+    | `Ok line ->
+        let line = !pending ^ line in
+        pending := "" ;
+        return (`Line line)
+  in
+  loop ()
+
+let rec process_reader ~inode ~rotated ~filename reader =
   let%bind next_line =
-    Reader.really_read_line ~wait_time:(Time.Span.of_sec 0.5) reader
+    really_read_line ~inode ~filename ~wait_time:(Time.Span.of_sec 0.2) reader
   in
   match next_line with
-  | Some line ->
-      if process_line ~rotated line then process_reader ~rotated reader
-      else Deferred.unit
-  | None ->
-      Deferred.unit
+  | `Line line ->
+      if process_line ~rotated line then
+        process_reader ~inode ~rotated ~filename reader
+      else return `File_rotated
+  | `File_changed ->
+      (* TODO: must reset all other state too? *)
+      current_block := "" ;
+      last_rotate_end_timestamp := 0.0 ;
+      return `File_changed
 
 let process_file filename =
   let rec loop rotated =
     let%bind result =
       try_with (fun () ->
-          Reader.with_file filename ~f:(process_reader ~rotated) )
+          Reader.with_file filename
+            ~f:
+              (process_reader ~inode:(Core.Unix.stat filename).st_ino ~rotated
+                 ~filename ) )
     in
     match result with
-    | Ok () ->
+    | Ok `File_rotated ->
         printf "File rotated, re-opening...\n%!" ;
         let%bind () = Clock.after (Time.Span.of_sec 2.0) in
         loop true
+    | Ok `File_changed ->
+        printf "File changed, re-opening...\n%!" ;
+        let%bind () = Clock.after (Time.Span.of_sec 2.0) in
+        loop false
     | Error exn ->
         eprintf
           "File '%s' could not be opened, retrying after 5 seconds. Reason:\n\
