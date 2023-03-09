@@ -104,7 +104,7 @@ let serve =
          ~doc:"Port for GraphQL server to listen on (default 9080)"
      and filename =
        flag "--trace-file" ~aliases:[ "trace-file" ] (required string)
-         ~doc:"Parth to internal trace file"
+         ~doc:"Path to internal trace file"
      in
      fun () ->
        let insecure_rest_server = true in
