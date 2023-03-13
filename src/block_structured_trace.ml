@@ -114,6 +114,28 @@ let checkpoint_children (c : Checkpoint.t) : Checkpoint.t list =
       ]
   | "Generate_transition" ->
       [ "Consensus_state_update"; "Consensus_state_update_done" ]
+  | "Produce_state_transition_proof" ->
+      [ "Prover_extend_blockchain" ]
+  | "Prover_extend_blockchain" ->
+      [ "Pickles_step_proof"; "Pickles_wrap_proof" ]
+  | "Pickles_step_proof" ->
+      [ "Step_generate_witness_conv"
+      ; "Step_compute_prev_proof_parts"
+      ; "Step_compute_prev_proof_parts_done"
+      ; "Step_compute_bulletproof_challenges"
+      ; "Step_compute_bulletproof_challenges_done"
+      ; "Backend_tick_proof_create_async"
+      ; "Backend_tick_proof_create_async_done"
+      ]
+  | "Pickles_wrap_proof" ->
+      [ "Wrap_compute_deferred_values"
+      ; "Wrap_compute_deferred_values_end"
+      ; "Wrap_generate_witness_conv"
+      ; "Wrap_verifier_incrementally_verify_proof"
+      ; "Wrap_verifier_incrementally_verify_proof_done"
+      ; "Backend_tock_proof_create_async"
+      ; "Backend_tock_proof_create_async_done"
+      ]
   | "Apply_staged_ledger_diff" ->
       [ "Update_coinbase_stack"
       ; "Update_coinbase_stack_done"
