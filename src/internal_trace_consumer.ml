@@ -77,7 +77,7 @@ module Prover_handler = struct
 
   let process_control _ _ = () (* TODO: keep pointer to previous checkpoint? *)
 
-  let file_changed () = () (* TODO: reset state? *)
+  let file_changed () = pending_prover_checkpoints := []
 
   let eof_reached () = () (* Nothing to do *)
 end
@@ -89,7 +89,7 @@ module Verifier_handler = struct
 
   let process_control _ _ = () (* TODO: keep pointer to previous checkpoint? *)
 
-  let file_changed () = () (* TODO: reset state? *)
+  let file_changed () = pending_verifier_checkpoints := []
 
   let eof_reached () = () (* Nothing to do *)
 end
