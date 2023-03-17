@@ -53,7 +53,7 @@ module Queries = struct
   let get_block_traces_distribution =
     field "blockTracesDistribution" ~doc:"Block trace checkpoints distribution"
       ~typ:(non_null json_type)
-      ~args:Arg.[] (* TODOX: add parent checkpoint filter *)
+      ~args:Arg.([] (* TODOX: add parent checkpoint filter *))
       ~resolve:(fun _info () ->
         let open Block_tracing.Distributions in
         let compare d1 d2 = Float.compare d1.total_time d2.total_time in
@@ -99,7 +99,7 @@ let create_graphql_server ~bind_to_address ~schema ~server_description port =
             graphql_callback () req body
         | _ ->
             Server.respond_string ~status:`Not_found "Route not found" >>| lift
-        ))
+        ) )
   |> Deferred.map ~f:(fun _ ->
          printf "Created %s at: http://localhost:%i/graphql\n%!"
            server_description port )

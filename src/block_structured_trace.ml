@@ -115,9 +115,13 @@ let checkpoint_children (c : Checkpoint.t) : Checkpoint.t list =
   | "Generate_transition" ->
       [ "Consensus_state_update"; "Consensus_state_update_done" ]
   | "Produce_state_transition_proof" ->
-      [ "Prover_extend_blockchain" ]
+      [ "Prover_extend_blockchain"; "Prover_extend_blockchain_done" ]
   | "Prover_extend_blockchain" ->
-      [ "Pickles_step_proof"; "Pickles_wrap_proof" ]
+      [ "Pickles_step_proof"
+      ; "Pickles_wrap_proof"
+      ; "Pickles_step_proof_done"
+      ; "Pickles_wrap_proof_done"
+      ]
   | "Pickles_step_proof" ->
       [ "Step_generate_witness_conv"
       ; "Step_compute_prev_proof_parts"
@@ -129,7 +133,7 @@ let checkpoint_children (c : Checkpoint.t) : Checkpoint.t list =
       ]
   | "Pickles_wrap_proof" ->
       [ "Wrap_compute_deferred_values"
-      ; "Wrap_compute_deferred_values_end"
+      ; "Wrap_compute_deferred_values_done"
       ; "Wrap_generate_witness_conv"
       ; "Wrap_verifier_incrementally_verify_proof"
       ; "Wrap_verifier_incrementally_verify_proof_done"
@@ -160,6 +164,42 @@ let checkpoint_children (c : Checkpoint.t) : Checkpoint.t list =
       [ "Begin_local_block_processing"
       ; "Add_and_finalize"
       ; "Add_and_finalize_done"
+      ]
+  | "Validate_proofs" ->
+      [ "Verifier_verify_blockchain_snarks"
+      ; "Verifier_verify_blockchain_snarks_done"
+      ]
+  | "Verify_blockchain_snarks" ->
+      [ "Verifier_verify_blockchain_snarks"
+      ; "Verifier_verify_blockchain_snarks_done"
+      ]
+  | "Verify_transaction_snarks" ->
+      [ "Verifier_verify_transaction_snarks"
+      ; "Verifier_verify_transaction_snarks_done"
+      ]
+  | "Verify_commands" ->
+      [ "Verifier_verify_commands"; "Verifier_verify_commands_done" ]
+  | "Verifier_verify_blockchain_snarks" ->
+      [ "Verify_heterogenous" ]
+  | "Verifier_verify_transaction_snarks" ->
+      [ "Verify_heterogenous" ]
+  | "Verifier_verify_commands" ->
+      [ "Verify_heterogenous" ]
+  | "Verify_heterogenous" ->
+      [ "Compute_plonks_and_chals"
+      ; "Compute_plonks_and_chals_done"
+      ; "Accumulator_check"
+      ; "Accumulator_check_done"
+      ; "Compute_batch_verify_inputs"
+      ; "Compute_batch_verify_inputs_done"
+      ; "Dlog_check_batch_verify"
+      ; "Dlog_check_batch_verify_done"
+      ]
+  | "Dlog_check_batch_verify" ->
+      [ "Batch_verify_backend_convert_inputs"
+      ; "Batch_verify_backend_convert_inputs_done"
+      ; "Batch_verify_backend"
+      ; "Batch_verify_backend_done"
       ]
   | _ ->
       []

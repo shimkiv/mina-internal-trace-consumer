@@ -86,13 +86,24 @@ let push_global_metadata ~metadata trace =
         ; metadata = Yojson.Safe.Util.combine trace.metadata (`Assoc metadata)
         }
 
-let push ~status ~source ?blockchain_length entry trace =
+let push ~status ~source ~ordered ?blockchain_length entry trace =
   match trace with
   | None ->
       let trace = empty ?blockchain_length source in
       { trace with checkpoints = [ entry ]; status }
   | Some ({ checkpoints = []; _ } as trace) ->
       { trace with checkpoints = [ entry ]; status }
+  | Some ({ checkpoints; _ } as trace) when ordered ->
+      let after, before =
+        List.split_while checkpoints ~f:(fun previous_entry ->
+            Float.(previous_entry.started_at >= entry.started_at) )
+      in
+      let previous, before = (List.hd_exn before, List.tl_exn before) in
+      let previous =
+        { previous with duration = entry.started_at -. previous.started_at }
+      in
+      (* FIXME: set duration for the new added entry *)
+      { trace with checkpoints = after @ (entry :: previous :: before) }
   | Some ({ checkpoints = previous :: rest; _ } as trace)
     when equal_status trace.status `Pending
          || not (equal_block_source source `External) ->

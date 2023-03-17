@@ -2,139 +2,105 @@ open Core
 open Async
 module Block_tracing = Block_tracing
 
+(* TODO: when current block is "0", checkpoints and metadata must be discarded *)
 let current_block = ref ""
 
-let last_rotate_end_timestamp = ref 0.0
+(* TODO: cleanup this from time to time *)
+let block_switches = ref []
 
-let process_checkpoint checkpoint timestamp =
-  Block_tracing.record ~block_id:!current_block ~checkpoint ~timestamp ()
+let block_just_switched = ref false
 
-let process_control control data =
-  match control with
-  | "current_block" ->
-      current_block := Yojson.Safe.Util.to_string data
-  | "metadata" ->
-      Block_tracing.push_metadata ~block_id:!current_block
-        (Yojson.Safe.Util.to_assoc data)
-  | "block_metadata" ->
-      Block_tracing.push_global_metadata ~block_id:!current_block
-        (Yojson.Safe.Util.to_assoc data)
-  | "produced_block_state_hash" ->
-      Block_tracing.set_produced_block_state_hash ~block_id:!current_block
-        (Yojson.Safe.Util.to_string data)
-  | "internal_tracing_enabled" ->
-      ()
-  | "mina_node_metadata" ->
-      ()
-  | another ->
-      eprintf "[WARN] unprocessed control: %s\n%!" another
+let pending_prover_checkpoints = ref []
 
-let process_event original yojson =
-  match yojson with
-  | `List [ `String checkpoint; `Float timestamp ] ->
-      process_checkpoint checkpoint timestamp ;
+let pending_verifier_checkpoints = ref []
+
+let find_nearest_block timestamp =
+  List.find_map !block_switches ~f:(fun (block, switch_timestamp) ->
+      if Float.(timestamp >= switch_timestamp) then Some block else None )
+
+let add_checkpoint_to_closest_trace (checkpoint, timestamp) =
+  match find_nearest_block timestamp with
+  | None ->
       true
-  | `Assoc [ ("rotated_log_end", `Float timestamp) ] ->
-      last_rotate_end_timestamp := timestamp ;
-      false
-  | `Assoc [ (head, data) ] ->
-      process_control head data ; true
-  | _ ->
-      eprintf "[WARN] unexpected: %s\n%!" original ;
-      true
-
-let process_log_rotated_start original yojson =
-  match yojson with
-  | `Assoc [ ("rotated_log_start", `Float timestamp) ] ->
-      if Float.(timestamp >= !last_rotate_end_timestamp) then true
-      else (
-        eprintf "[WARN] file rotatation issued but file didn't rotate\n%!" ;
-        false )
-  | _ ->
-      eprintf "[WARN] expected rotated_log_start, but got: %s\n%!" original ;
+  | Some block_id ->
+      Block_tracing.record ~block_id ~checkpoint ~timestamp ~ordered:true () ;
       false
 
-let process_line ~rotated line =
-  try
-    let yojson = Yojson.Safe.from_string line in
-    if rotated then process_log_rotated_start line yojson
-    else process_event line yojson
-  with _ ->
-    eprintf "[ERROR] could not parse line: %s\n%!" line ;
-    true
+let process_pending_checkpoints pending_checkpoints =
+  if not @@ List.is_empty !pending_checkpoints then
+    pending_checkpoints :=
+      !pending_checkpoints |> List.rev
+      |> List.filter ~f:add_checkpoint_to_closest_trace
+      |> List.rev
 
-let file_changed inode filename =
-  try
-    let stat = Core.Unix.stat filename in
-    inode <> stat.st_ino
-  with Unix.Unix_error _ ->
-    eprintf "File '%s' removed\n%!" filename ;
-    true
+module Main_handler = struct
+  let process_checkpoint checkpoint timestamp =
+    if !block_just_switched then
+      block_switches := (!current_block, timestamp) :: !block_switches ;
+    Block_tracing.record ~block_id:!current_block ~checkpoint ~timestamp ()
 
-let really_read_line ~inode ~filename ~wait_time reader =
-  let pending = ref "" in
-  let rec loop () =
-    let%bind result = Reader.read_until reader (`Char '\n') ~keep_delim:false in
-    match result with
-    | `Eof ->
-        if file_changed inode filename then return `File_changed
-        else
-          let%bind () = Clock.after wait_time in
-          loop ()
-    | `Eof_without_delim data ->
-        pending := !pending ^ data ;
-        let%bind () = Clock.after wait_time in
-        loop ()
-    | `Ok line ->
-        let line = !pending ^ line in
-        pending := "" ;
-        return (`Line line)
-  in
-  loop ()
+  let process_control control data =
+    match control with
+    | "current_block" ->
+        current_block := Yojson.Safe.Util.to_string data ;
+        block_just_switched := true
+    | "metadata" ->
+        Block_tracing.push_metadata ~block_id:!current_block
+          (Yojson.Safe.Util.to_assoc data)
+    | "block_metadata" ->
+        Block_tracing.push_global_metadata ~block_id:!current_block
+          (Yojson.Safe.Util.to_assoc data)
+    | "produced_block_state_hash" ->
+        Block_tracing.set_produced_block_state_hash ~block_id:!current_block
+          (Yojson.Safe.Util.to_string data)
+    | "internal_tracing_enabled" ->
+        ()
+    | "mina_node_metadata" ->
+        ()
+    | another ->
+        eprintf "[WARN] unprocessed control: %s\n%!" another
 
-let rec process_reader ~inode ~rotated ~filename reader =
-  let%bind next_line =
-    really_read_line ~inode ~filename ~wait_time:(Time.Span.of_sec 0.2) reader
-  in
-  match next_line with
-  | `Line line ->
-      if process_line ~rotated line then
-        process_reader ~inode ~rotated ~filename reader
-      else return `File_rotated
-  | `File_changed ->
-      (* TODO: must reset all other state too? *)
-      current_block := "" ;
-      last_rotate_end_timestamp := 0.0 ;
-      return `File_changed
+  (* TODO: reset all traces too? *)
+  let file_changed () =
+    current_block := "" ;
+    block_switches := []
 
-let process_file filename =
-  let rec loop rotated =
-    let%bind result =
-      try_with (fun () ->
-          Reader.with_file filename
-            ~f:
-              (process_reader ~inode:(Core.Unix.stat filename).st_ino ~rotated
-                 ~filename ) )
-    in
-    match result with
-    | Ok `File_rotated ->
-        printf "File rotated, re-opening...\n%!" ;
-        let%bind () = Clock.after (Time.Span.of_sec 2.0) in
-        loop true
-    | Ok `File_changed ->
-        printf "File changed, re-opening...\n%!" ;
-        let%bind () = Clock.after (Time.Span.of_sec 2.0) in
-        loop false
-    | Error exn ->
-        eprintf
-          "File '%s' could not be opened, retrying after 5 seconds. Reason:\n\
-           %s\n\
-           %!"
-          filename (Exn.to_string exn) ;
-        let%bind () = Clock.after (Time.Span.of_sec 5.0) in
-        loop rotated
-  in
-  loop false
+  let eof_reached () =
+    process_pending_checkpoints pending_prover_checkpoints ;
+    process_pending_checkpoints pending_verifier_checkpoints
+end
+
+module Prover_handler = struct
+  let process_checkpoint checkpoint timestamp =
+    pending_prover_checkpoints :=
+      (checkpoint, timestamp) :: !pending_prover_checkpoints
+
+  let process_control _ _ = () (* TODO: keep pointer to previous checkpoint? *)
+
+  let file_changed () = () (* TODO: reset state? *)
+
+  let eof_reached () = () (* Nothing to do *)
+end
+
+module Verifier_handler = struct
+  let process_checkpoint checkpoint timestamp =
+    pending_verifier_checkpoints :=
+      (checkpoint, timestamp) :: !pending_verifier_checkpoints
+
+  let process_control _ _ = () (* TODO: keep pointer to previous checkpoint? *)
+
+  let file_changed () = () (* TODO: reset state? *)
+
+  let eof_reached () = () (* Nothing to do *)
+end
+
+module Main_trace_processor = Trace_file_processor.Make (Main_handler)
+module Prover_trace_processor = Trace_file_processor.Make (Prover_handler)
+module Verifier_trace_processor = Trace_file_processor.Make (Verifier_handler)
+
+let add_filename_prefix original_path ~prefix =
+  let open Filename in
+  concat (dirname original_path) (prefix ^ basename original_path)
 
 let serve =
   Command.async ~summary:"Internal trace processor with GraphQL server"
@@ -142,9 +108,15 @@ let serve =
        flag "--port" ~aliases:[ "port" ]
          (optional_with_default 9080 int)
          ~doc:"Port for GraphQL server to listen on (default 9080)"
-     and filename =
+     and main_trace_file_path =
        flag "--trace-file" ~aliases:[ "trace-file" ] (required string)
-         ~doc:"Path to internal trace file"
+         ~doc:"Path to main internal trace file"
+     in
+     let prover_trace_file_path =
+       add_filename_prefix main_trace_file_path ~prefix:"prover-"
+     in
+     let verifier_trace_file_path =
+       add_filename_prefix main_trace_file_path ~prefix:"verifier-"
      in
      fun () ->
        let insecure_rest_server = true in
@@ -157,8 +129,17 @@ let serve =
            ~schema:Graphql_server.schema ~server_description:"GraphQL server"
            port
        in
-       printf "Consuming events from file: %s\n%!" filename ;
-       let%bind () = process_file filename in
+       printf "Consuming main trace events from file: %s\n%!"
+         main_trace_file_path ;
+       printf "Consuming prover trace events from file: %s\n%!"
+         prover_trace_file_path ;
+       printf "Consuming verifier trace events from file: %s\n%!"
+         verifier_trace_file_path ;
+       let%bind () = Main_trace_processor.process_file main_trace_file_path
+       and () = Prover_trace_processor.process_file prover_trace_file_path
+       and () =
+         Verifier_trace_processor.process_file verifier_trace_file_path
+       in
        printf "Done\n%!" ; Deferred.unit )
 
 let commands = [ ("serve", serve) ]
