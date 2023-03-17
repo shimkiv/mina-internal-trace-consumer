@@ -10,34 +10,56 @@ let block_switches = ref []
 
 let block_just_switched = ref false
 
-let pending_prover_checkpoints = ref []
+module Pending = struct
+  type t = Checkpoint of (string * float) | Control of (string * Yojson.Safe.t)
+end
 
-let pending_verifier_checkpoints = ref []
+let pending_prover_entries : Pending.t list ref = ref []
+
+let pending_verifier_entries : Pending.t list ref = ref []
 
 let find_nearest_block timestamp =
   List.find_map !block_switches ~f:(fun (block, switch_timestamp) ->
       if Float.(timestamp >= switch_timestamp) then Some block else None )
 
-let add_checkpoint_to_closest_trace (checkpoint, timestamp) =
-  match find_nearest_block timestamp with
-  | None ->
-      true
-  | Some block_id ->
-      Block_tracing.record ~block_id ~checkpoint ~timestamp ~ordered:true () ;
+let current_prover_entry = ref (Block_trace.Entry.make ~timestamp:0.0 "")
+let current_verifier_entry = ref (Block_trace.Entry.make ~timestamp:0.0 "")
+
+let add_entry_to_closest_trace current_entry entry =
+  match entry with
+  | Pending.Checkpoint (checkpoint, timestamp) -> (
+      match find_nearest_block timestamp with
+      | None ->
+          true
+      | Some block_id ->
+          current_entry :=
+            Block_tracing.record ~block_id ~checkpoint ~timestamp ~ordered:true
+              () ;
+          false )
+  | Pending.Control ("metadata", data) ->
+    printf "Merging metadata into %s\n%!" !current_entry.checkpoint;
+      !current_entry.metadata <-
+        Yojson.Safe.Util.combine !current_entry.metadata data ;
+      false
+  | Pending.Control (other, _) ->
+    printf "Ignoring control %s\n%!" other;
       false
 
-let process_pending_checkpoints pending_checkpoints =
+let process_pending_entries current_entry pending_checkpoints =
   if not @@ List.is_empty !pending_checkpoints then
     pending_checkpoints :=
       !pending_checkpoints |> List.rev
-      |> List.filter ~f:add_checkpoint_to_closest_trace
+      |> List.filter ~f:(add_entry_to_closest_trace current_entry)
       |> List.rev
 
 module Main_handler = struct
   let process_checkpoint checkpoint timestamp =
     if !block_just_switched then
       block_switches := (!current_block, timestamp) :: !block_switches ;
-    Block_tracing.record ~block_id:!current_block ~checkpoint ~timestamp ()
+    let _entry =
+      Block_tracing.record ~block_id:!current_block ~checkpoint ~timestamp ()
+    in
+    ()
 
   let process_control control data =
     match control with
@@ -66,30 +88,34 @@ module Main_handler = struct
     block_switches := []
 
   let eof_reached () =
-    process_pending_checkpoints pending_prover_checkpoints ;
-    process_pending_checkpoints pending_verifier_checkpoints
+    process_pending_entries current_prover_entry pending_prover_entries ;
+    process_pending_entries current_verifier_entry pending_verifier_entries
 end
 
 module Prover_handler = struct
   let process_checkpoint checkpoint timestamp =
-    pending_prover_checkpoints :=
-      (checkpoint, timestamp) :: !pending_prover_checkpoints
+    pending_prover_entries :=
+      Pending.Checkpoint (checkpoint, timestamp) :: !pending_prover_entries
 
-  let process_control _ _ = () (* TODO: keep pointer to previous checkpoint? *)
+  let process_control tag data =
+    pending_prover_entries :=
+      Pending.Control (tag, data) :: !pending_prover_entries
 
-  let file_changed () = pending_prover_checkpoints := []
+  let file_changed () = pending_prover_entries := []
 
   let eof_reached () = () (* Nothing to do *)
 end
 
 module Verifier_handler = struct
   let process_checkpoint checkpoint timestamp =
-    pending_verifier_checkpoints :=
-      (checkpoint, timestamp) :: !pending_verifier_checkpoints
+    pending_verifier_entries :=
+      Pending.Checkpoint (checkpoint, timestamp) :: !pending_verifier_entries
 
-  let process_control _ _ = () (* TODO: keep pointer to previous checkpoint? *)
+  let process_control tag data =
+    pending_verifier_entries :=
+      Pending.Control (tag, data) :: !pending_verifier_entries
 
-  let file_changed () = pending_verifier_checkpoints := []
+  let file_changed () = pending_verifier_entries := []
 
   let eof_reached () = () (* Nothing to do *)
 end

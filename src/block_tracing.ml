@@ -226,29 +226,26 @@ let handle_status_change status block_id =
   | _ ->
       ()
 
-let checkpoint ?status ?metadata ?blockchain_length ?block_id ?source
+let checkpoint ?status ?metadata ?blockchain_length ~block_id ?source
     ?(ordered = false) ~checkpoint ~timestamp () =
-  match block_id with
-  | None ->
-      ()
-  | Some block_id ->
-      let source =
-        match source with
-        | None ->
-            compute_source checkpoint
-        | Some source ->
-            source
-      in
-      let status =
-        match status with
-        | Some status ->
-            status
-        | None ->
-            compute_status checkpoint
-      in
-      handle_status_change status block_id ;
-      Registry.push_entry ~status ~source ~ordered ?blockchain_length block_id
-        (Trace.Entry.make ?metadata ~timestamp checkpoint)
+  let source =
+    match source with
+    | None ->
+        compute_source checkpoint
+    | Some source ->
+        source
+  in
+  let status =
+    match status with
+    | Some status ->
+        status
+    | None ->
+        compute_status checkpoint
+  in
+  handle_status_change status block_id ;
+  let entry = Trace.Entry.make ?metadata ~timestamp checkpoint in
+  Registry.push_entry ~status ~source ~ordered ?blockchain_length block_id entry ;
+  entry
 
 let failure ~reason =
   checkpoint

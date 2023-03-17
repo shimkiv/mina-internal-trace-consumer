@@ -6,7 +6,7 @@ module Entry = struct
     { checkpoint : Checkpoint.t
     ; started_at : float
     ; duration : float
-    ; metadata : Yojson.Safe.t
+    ; mutable metadata : Yojson.Safe.t
     }
   [@@deriving to_yojson]
 
