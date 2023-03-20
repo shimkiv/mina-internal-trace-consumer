@@ -140,6 +140,29 @@ let checkpoint_children (c : Checkpoint.t) : Checkpoint.t list =
       ; "Backend_tock_proof_create_async"
       ; "Backend_tock_proof_create_async_done"
       ]
+  | "Backend_tick_proof_create_async" ->
+      [ "Kimchi_pasta_fp_plonk_proof_create"
+      ; "Kimchi_pasta_fq_plonk_proof_create"
+      ]
+  | "Kimchi_pasta_fp_plonk_proof_create" | "Kimchi_pasta_fq_plonk_proof_create"
+    ->
+      [ "Kimchi_create_recursive"; "Kimchi_create_recursive_done" ]
+  | "Kimchi_create_recursive" ->
+      [ "Kimchi_pad_witness"
+      ; "Kimchi_set_up_fq_sponge"
+      ; "Kimchi_commit_to_witness_columns"
+      ; "Kimchi_z_permutation_aggregation_polynomial"
+      ; "Kimchi_eval_witness_polynomials_over_domains"
+      ; "Kimchi_compute_index_evals"
+      ; "Kimchi_compute_quotient_poly"
+      ; "Kimchi_lagrange_basis_eval_zeta_poly"
+      ; "Kimchi_lagrange_basis_eval_zeta_omega_poly"
+      ; "Kimchi_chunk_eval_zeta_omega_poly"
+      ; "Kimchi_compute_ft_poly"
+      ; "Kimchi_ft_eval_zeta_omega"
+      ; "Kimchi_build_polynomials"
+      ; "Kimchi_create_aggregated_evaluation_proof"
+      ]
   | "Apply_staged_ledger_diff" ->
       [ "Update_coinbase_stack"
       ; "Update_coinbase_stack_done"
@@ -180,7 +203,10 @@ let checkpoint_children (c : Checkpoint.t) : Checkpoint.t list =
   | "Verify_commands" ->
       [ "Verifier_verify_commands"; "Verifier_verify_commands_done" ]
   | "Verifier_verify_blockchain_snarks" ->
-      [ "Verify_heterogenous" ]
+      [ "Wrap_verifier_incrementally_verify_proof"
+      ; "Wrap_verifier_incrementally_verify_proof_done"
+      ; "Verify_heterogenous"
+      ]
   | "Verifier_verify_transaction_snarks" ->
       [ "Verify_heterogenous" ]
   | "Verifier_verify_commands" ->
