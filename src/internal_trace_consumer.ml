@@ -87,7 +87,7 @@ let add_entry_to_closest_trace ~context_blocks current_entry entry =
           false
       | None ->
           true )
-  | Pending.Control (other, _) ->
+  | Pending.Control (_, _) ->
       (* printf "Ignoring control %s\n%!" other ; *)
       false
 

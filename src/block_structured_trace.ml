@@ -52,6 +52,8 @@ let checkpoint_children (c : Checkpoint.t) : Checkpoint.t list =
       [ "Validate_staged_ledger_diff"; "Create_breadcrumb" ]
   | "Validate_staged_ledger_diff" ->
       [ "Check_completed_works"; "Prediff"; "Apply_diff"; "Diff_applied" ]
+  | "Prediff" ->
+      [ "Verify_commands"; "Verify_commands_done" ]
   | "Check_completed_works" ->
       [ "Verify_transaction_snarks"; "Verify_transaction_snarks_done" ]
   | "Apply_diff" ->
@@ -140,7 +142,7 @@ let checkpoint_children (c : Checkpoint.t) : Checkpoint.t list =
       ; "Backend_tock_proof_create_async"
       ; "Backend_tock_proof_create_async_done"
       ]
-  | "Backend_tick_proof_create_async" ->
+  | "Backend_tick_proof_create_async" | "Backend_tock_proof_create_async" ->
       [ "Kimchi_pasta_fp_plonk_proof_create"
       ; "Kimchi_pasta_fq_plonk_proof_create"
       ]
