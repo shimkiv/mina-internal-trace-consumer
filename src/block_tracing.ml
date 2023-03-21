@@ -104,7 +104,10 @@ module Registry = struct
 
   let find_trace state_hash = Hashtbl.find registry state_hash
 
-  let all_traces ?max_length () =
+  let all_traces ?max_length ?height () =
+    let matches_height blockchain_length =
+      Option.value_map ~default:true ~f:(( = ) blockchain_length) height
+    in
     let traces =
       Hashtbl.to_alist registry
       |> List.filter_map ~f:(fun (key, item) ->
@@ -122,15 +125,17 @@ module Registry = struct
                        } =
                    item
                  in
-                 Some
-                   { state_hash
-                   ; blockchain_length
-                   ; source
-                   ; status
-                   ; started_at = Trace.started_at item
-                   ; total_time
-                   ; metadata
-                   } )
+                 if matches_height blockchain_length then
+                   Some
+                     { state_hash
+                     ; blockchain_length
+                     ; source
+                     ; status
+                     ; started_at = Trace.started_at item
+                     ; total_time
+                     ; metadata
+                     }
+                 else None )
     in
     let traces =
       traces
