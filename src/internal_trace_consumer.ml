@@ -225,6 +225,15 @@ let serve =
          prover_trace_file_path ;
        printf "Consuming verifier trace events from file: %s\n%!"
          verifier_trace_file_path ;
+       (* First we process the old rotated files *)
+       let%bind () =
+         Main_trace_processor.process_roated_files main_trace_file_path
+       and () =
+         Prover_trace_processor.process_roated_files prover_trace_file_path
+       and () =
+         Verifier_trace_processor.process_roated_files verifier_trace_file_path
+       in
+       (* Then the main files *)
        let%bind () = Main_trace_processor.process_file main_trace_file_path
        and () = Prover_trace_processor.process_file prover_trace_file_path
        and () =

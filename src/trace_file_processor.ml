@@ -95,7 +95,7 @@ struct
     | `File_changed ->
         return `File_changed
 
-  let process_file filename =
+  let process_file ?(without_rotation=false) filename =
     let rec loop rotated =
       let%bind result =
         try_with (fun () ->
@@ -105,6 +105,9 @@ struct
                    ~filename ) )
       in
       match result with
+      | Ok `File_rotated when without_rotation ->
+        printf "Done processing rotated file %s...\n%!" filename ;
+        Deferred.unit
       | Ok `File_rotated ->
           printf "File rotated, re-opening %s...\n%!" filename ;
           let%bind () = Clock.after (Time.Span.of_sec 2.0) in
@@ -125,4 +128,14 @@ struct
           loop rotated
     in
     loop false
+
+  let process_roated_files filename =
+    Deferred.List.iter ~how:`Sequential (List.range 0 100) ~f:(fun n ->
+      let filename_n = sprintf "%s.%d" filename n in
+      try
+        let _stat = Core.Unix.stat filename_n in
+        process_file ~without_rotation:true filename_n
+      with Core.Unix.Unix_error _ ->
+        Deferred.unit
+      )
 end
