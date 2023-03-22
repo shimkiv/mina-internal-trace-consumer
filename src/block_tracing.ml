@@ -80,16 +80,6 @@ module Registry = struct
     | _ ->
         fields
 
-  let trace_info_to_yojson t =
-    let blockchain_length_string = Int.to_string t.blockchain_length in
-    match trace_info_to_yojson t with
-    | `Assoc fields ->
-        let fields = filter_metadata_field fields in
-        `Assoc
-          (("blockchain_length", `String blockchain_length_string) :: fields)
-    | other ->
-        other
-
   type traces = { traces : trace_info list; produced_traces : trace_info list }
   [@@deriving to_yojson]
 
