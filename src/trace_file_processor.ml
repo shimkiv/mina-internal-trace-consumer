@@ -90,7 +90,7 @@ struct
         process_reader ~inode ~rotated ~filename reader
     | `Line line ->
         if process_line ~rotated line then
-          process_reader ~inode ~rotated ~filename reader
+          process_reader ~inode ~rotated:false ~filename reader
         else return `File_rotated
     | `File_changed ->
         return `File_changed
