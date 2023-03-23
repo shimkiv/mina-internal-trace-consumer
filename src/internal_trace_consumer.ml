@@ -6,27 +6,52 @@ module Block_tracing = Block_tracing
 let current_block = ref ""
 
 (* TODO: cleanup these from time to time *)
-let verifier_calls_context_block = ref []
 
-let prover_calls_context_block = ref []
+(* These tables keep track of the context switches for blocks in the main trace when
+   making calls to the prover or verifier. The mapping is from:
+   [parent_call_checkpoint -> (block_id, timestamp)] *)
+let verifier_calls_context_block : (string * float) list String.Table.t =
+  String.Table.create ()
 
-let block_just_switched = ref false
+let prover_calls_context_block : (string * float) list String.Table.t =
+  String.Table.create ()
 
 module Pending = struct
   type t = Checkpoint of (string * float) | Control of (string * Yojson.Safe.t)
+
+  type registry = t list Int.Table.t
+
+  let prover_entries : registry = Int.Table.create ()
+
+  let verifier_entries : registry = Int.Table.create ()
+
+  (* Helper for being able to find the location in the main trace on which to attach
+     verifier and prover checkpoints. Also to know when a verifier/prover trace is
+     already complete (partial traces are left pending until completed) *)
+  let parent_and_finish_checkpoints = function
+    | "Verifier_verify_transaction_snarks" ->
+        Some
+          ( "Verify_transaction_snarks"
+          , "Verifier_verify_transaction_snarks_done" )
+    | "Verifier_verify_blockchain_snarks" ->
+        Some
+          ("Verify_blockchain_snarks", "Verifier_verify_blockchain_snarks_done")
+    | "Verifier_verify_commands" ->
+        Some ("Verify_commands", "Verifier_verify_commands_done")
+    | "Prover_extend_blockchain" ->
+        Some ("Produce_state_transition_proof", "Prover_extend_blockchain_done")
+    | _ ->
+        None
 end
 
-let pending_prover_entries : Pending.t list ref = ref []
-
-let pending_verifier_entries : Pending.t list ref = ref []
+let push_pending_entry table call_id (entry : Pending.t) =
+  Int.Table.update table call_id ~f:(fun entries ->
+      let entries = Option.value ~default:[] entries in
+      entry :: entries )
 
 let find_nearest_block ~context_blocks timestamp =
   List.find_map context_blocks ~f:(fun (block, switch_timestamp) ->
       if Float.(timestamp >= switch_timestamp) then Some block else None )
-
-let current_prover_entry = ref (Block_trace.Entry.make ~timestamp:0.0 "")
-
-let current_verifier_entry = ref (Block_trace.Entry.make ~timestamp:0.0 "")
 
 let push_kimchi_checkpoints_from_metadata ~block_id (metadata : Yojson.Safe.t) =
   try
@@ -61,43 +86,64 @@ let push_kimchi_checkpoints_from_metadata ~block_id (metadata : Yojson.Safe.t) =
       (Exn.to_string exn) ;
     eprintf "BACKTRACE:\n%s\n%!" (Printexc.get_backtrace ())
 
-let add_entry_to_closest_trace ~context_blocks current_entry entry =
-  match entry with
-  | Pending.Checkpoint (checkpoint, timestamp) -> (
-      match find_nearest_block ~context_blocks timestamp with
-      | None ->
-          true
-      | Some block_id ->
-          current_entry :=
-            Block_tracing.record ~block_id ~checkpoint ~timestamp ~ordered:true
-              () ;
-          false )
-  | Pending.Control ("metadata", data) -> (
-      match find_nearest_block ~context_blocks !current_entry.started_at with
-      | Some block_id ->
-          if
-            String.equal "Backend_tick_proof_create_async"
-              !current_entry.checkpoint
-            || String.equal "Backend_tock_proof_create_async"
-                 !current_entry.checkpoint
-          then push_kimchi_checkpoints_from_metadata ~block_id data
-          else
-            !current_entry.metadata <-
-              Yojson.Safe.Util.combine !current_entry.metadata data ;
-          false
-      | None ->
-          true )
-  | Pending.Control (_, _) ->
-      (* printf "Ignoring control %s\n%!" other ; *)
-      false
+let add_pending_entries_to_block_trace ~block_id pending_entries =
+  let rec loop entries current_entry =
+    match entries with
+    | Pending.Checkpoint (checkpoint, timestamp) :: entries ->
+        let current_entry =
+          Block_tracing.record ~block_id ~checkpoint ~timestamp ~ordered:true ()
+        in
+        loop entries current_entry
+    | Pending.Control ("metadata", data) :: entries ->
+        if
+          String.equal "Backend_tick_proof_create_async"
+            current_entry.checkpoint
+          || String.equal "Backend_tock_proof_create_async"
+               current_entry.checkpoint
+        then push_kimchi_checkpoints_from_metadata ~block_id data
+        else
+          current_entry.metadata <-
+            Yojson.Safe.Util.combine current_entry.metadata data ;
+        loop entries current_entry
+    | Pending.Control (_, _) :: entries ->
+        (* printf "Ignoring control %s\n%!" other ; *)
+        loop entries current_entry
+    | [] ->
+        ()
+  in
+  loop pending_entries (Block_trace.Entry.make ~timestamp:0.0 "")
 
-let process_pending_entries ~context_blocks current_entry pending_checkpoints =
-  if not @@ List.is_empty !pending_checkpoints then
-    pending_checkpoints :=
-      !pending_checkpoints |> List.rev
-      |> List.filter
-           ~f:(add_entry_to_closest_trace ~context_blocks current_entry)
-      |> List.rev
+(* Pending, complete verifier/prover traces are matched to a block trace by their timestamp
+   and expected parent call (a checkpoint in the main trace). Once added they are removed
+   from the pending table. *)
+let process_pending_entries ~context_blocks
+    (pending_checkpoints : Pending.registry) =
+  Int.Table.filter_inplace pending_checkpoints ~f:(fun rev_pending_entries ->
+      let pending_entries = List.rev rev_pending_entries in
+      match pending_entries with
+      | Checkpoint (first_checkpoint, first_timestamp) :: _ -> (
+          match
+            ( Pending.parent_and_finish_checkpoints first_checkpoint
+            , List.hd rev_pending_entries )
+          with
+          | ( Some (parent_checkpoint, end_checkpoint)
+            , Some (Checkpoint (last_checkpoint, _)) )
+            when String.equal end_checkpoint last_checkpoint -> (
+              match String.Table.find context_blocks parent_checkpoint with
+              | Some context_blocks -> (
+                  match find_nearest_block ~context_blocks first_timestamp with
+                  | Some block_id ->
+                      add_pending_entries_to_block_trace ~block_id
+                        pending_entries ;
+                      false
+                  | None ->
+                      true )
+              | None ->
+                  true )
+          | _ ->
+              true )
+      | _ ->
+          true (* TODO: warning, this shouldn't happen *) )
 
 module Main_handler = struct
   let handle_verifier_and_prover_call_checkpoints checkpoint timestamp =
@@ -105,11 +151,15 @@ module Main_handler = struct
     | "Verify_transaction_snarks"
     | "Verify_blockchain_snarks"
     | "Verify_commands" ->
-        verifier_calls_context_block :=
-          (!current_block, timestamp) :: !verifier_calls_context_block
+        String.Table.update verifier_calls_context_block checkpoint
+          ~f:(fun entries ->
+            let entries = Option.value ~default:[] entries in
+            (!current_block, timestamp) :: entries )
     | "Produce_state_transition_proof" ->
-        prover_calls_context_block :=
-          (!current_block, timestamp) :: !prover_calls_context_block
+        String.Table.update prover_calls_context_block checkpoint
+          ~f:(fun entries ->
+            let entries = Option.value ~default:[] entries in
+            (!current_block, timestamp) :: entries )
     | _ ->
         ()
 
@@ -124,7 +174,6 @@ module Main_handler = struct
     match control with
     | "current_block" ->
         current_block := Yojson.Safe.Util.to_string data ;
-        block_just_switched := true
     | "metadata" ->
         Block_tracing.push_metadata ~block_id:!current_block
           (Yojson.Safe.Util.to_assoc data)
@@ -144,42 +193,50 @@ module Main_handler = struct
   (* TODO: reset all traces too? *)
   let file_changed () =
     current_block := "" ;
-    verifier_calls_context_block := [] ;
-    prover_calls_context_block := []
+    String.Table.clear verifier_calls_context_block ;
+    String.Table.clear prover_calls_context_block
 
   let eof_reached () =
-    process_pending_entries
-      ~context_blocks:!prover_calls_context_block
-      current_prover_entry pending_prover_entries ;
-    process_pending_entries
-      ~context_blocks:!verifier_calls_context_block
-      current_verifier_entry pending_verifier_entries
+    process_pending_entries ~context_blocks:prover_calls_context_block
+      Pending.prover_entries ;
+    process_pending_entries ~context_blocks:verifier_calls_context_block
+      Pending.verifier_entries
 end
 
 module Prover_handler = struct
+  let current_call_id = ref 0
+
   let process_checkpoint checkpoint timestamp =
-    pending_prover_entries :=
-      Pending.Checkpoint (checkpoint, timestamp) :: !pending_prover_entries
+    push_pending_entry Pending.prover_entries !current_call_id
+      (Pending.Checkpoint (checkpoint, timestamp))
 
   let process_control tag data =
-    pending_prover_entries :=
-      Pending.Control (tag, data) :: !pending_prover_entries
+    if String.equal tag "current_call_id" then
+      current_call_id := Yojson.Safe.Util.to_int data
+    else
+      push_pending_entry Pending.prover_entries !current_call_id
+        (Pending.Control (tag, data))
 
-  let file_changed () = pending_prover_entries := []
+  let file_changed () = Int.Table.clear Pending.prover_entries
 
   let eof_reached () = () (* Nothing to do *)
 end
 
 module Verifier_handler = struct
+  let current_call_id = ref 0
+
   let process_checkpoint checkpoint timestamp =
-    pending_verifier_entries :=
-      Pending.Checkpoint (checkpoint, timestamp) :: !pending_verifier_entries
+    push_pending_entry Pending.verifier_entries !current_call_id
+      (Pending.Checkpoint (checkpoint, timestamp))
 
   let process_control tag data =
-    pending_verifier_entries :=
-      Pending.Control (tag, data) :: !pending_verifier_entries
+    if String.equal tag "current_call_id" then
+      current_call_id := Yojson.Safe.Util.to_int data
+    else
+      push_pending_entry Pending.verifier_entries !current_call_id
+        (Pending.Control (tag, data))
 
-  let file_changed () = pending_verifier_entries := []
+  let file_changed () = Int.Table.clear Pending.verifier_entries
 
   let eof_reached () = () (* Nothing to do *)
 end
