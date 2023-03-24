@@ -3,7 +3,7 @@ open Async
 module Block_tracing = Block_tracing
 
 (* TODO: when current block is "0", checkpoints and metadata must be discarded *)
-let current_block = ref ""
+let current_block = ref "0"
 
 (* TODO: cleanup these from time to time *)
 
@@ -186,13 +186,14 @@ module Main_handler = struct
     | "internal_tracing_enabled" ->
         ()
     | "mina_node_metadata" ->
+        (* TODO: should clear all old data here? *)
         ()
     | another ->
         eprintf "[WARN] unprocessed control: %s\n%!" another
 
   (* TODO: reset all traces too? *)
   let file_changed () =
-    current_block := "" ;
+    current_block := "0" ;
     String.Table.clear verifier_calls_context_block ;
     String.Table.clear prover_calls_context_block
 
@@ -294,9 +295,9 @@ let serve =
        and () =
          let%bind () = Main_handler.synced () in
          let%bind () =
-           Prover_trace_processor.process_roated_files verifier_trace_file_path
+           Prover_trace_processor.process_roated_files prover_trace_file_path
          in
-         Prover_trace_processor.process_file verifier_trace_file_path
+         Prover_trace_processor.process_file prover_trace_file_path
        and () =
          let%bind () = Main_handler.synced () in
          let%bind () =

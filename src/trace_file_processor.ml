@@ -107,19 +107,19 @@ struct
       in
       match result with
       | Ok `File_rotated when without_rotation ->
-          printf "Done processing rotated file %s...\n%!" filename ;
+          printf "Done processing rotated file %s\n%!" filename ;
           Deferred.unit
       | Ok `Eof_reached ->
-          printf "Done processing rotated file %s...\n%!" filename ;
+          printf "Done processing rotated file %s\n%!" filename ;
           Deferred.unit
       | Ok `File_rotated ->
-          printf "File rotated, re-opening %s...\n%!" filename ;
+          printf "File rotated, re-opening %s\n%!" filename ;
           let%bind () = Clock.after (Time.Span.of_sec 2.0) in
           loop true
       | Ok `File_changed ->
           Handler.file_changed () ;
           last_rotate_end_timestamp := 0.0 ;
-          printf "File changed, re-opening %s...\n%!" filename ;
+          printf "File changed, re-opening %s\n%!" filename ;
           let%bind () = Clock.after (Time.Span.of_sec 2.0) in
           loop false
       | Error exn ->
@@ -139,7 +139,6 @@ struct
         let filename_n = sprintf "%s.%d" filename n in
         try
           let _stat = Core.Unix.stat filename_n in
-          printf "Begin processing rotated file: %s\n%!" filename_n ;
           process_file ~without_rotation:true filename_n
         with Core.Unix.Unix_error _ -> Deferred.unit )
 end
