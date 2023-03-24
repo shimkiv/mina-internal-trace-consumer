@@ -85,7 +85,7 @@ struct
     in
     match next_line with
     | `Eof_reached ->
-        Handler.eof_reached () ;
+        if not stop_on_eof then Handler.eof_reached () ;
         let%bind () = Clock.after (Time.Span.of_sec 0.2) in
         if stop_on_eof then return `Eof_reached
         else process_reader ~inode ~stop_on_eof ~rotated ~filename reader
