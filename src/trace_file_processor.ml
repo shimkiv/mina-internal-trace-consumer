@@ -79,7 +79,7 @@ struct
     in
     loop ()
 
-  let rec process_reader ~inode ~rotated ~filename reader =
+  let rec process_reader ~inode ~stop_on_eof ~rotated ~filename reader =
     let%bind next_line =
       really_read_line ~inode ~filename ~wait_time:(Time.Span.of_sec 0.2) reader
     in
@@ -87,27 +87,31 @@ struct
     | `Eof_reached ->
         Handler.eof_reached () ;
         let%bind () = Clock.after (Time.Span.of_sec 0.2) in
-        process_reader ~inode ~rotated ~filename reader
+        if stop_on_eof then return `Eof_reached
+        else process_reader ~inode ~stop_on_eof ~rotated ~filename reader
     | `Line line ->
         if process_line ~rotated line then
-          process_reader ~inode ~rotated:false ~filename reader
+          process_reader ~inode ~stop_on_eof ~rotated:false ~filename reader
         else return `File_rotated
     | `File_changed ->
         return `File_changed
 
-  let process_file ?(without_rotation=false) filename =
+  let process_file ?(without_rotation = false) filename =
     let rec loop rotated =
       let%bind result =
         try_with (fun () ->
             Reader.with_file filename
               ~f:
-                (process_reader ~inode:(Core.Unix.stat filename).st_ino ~rotated
-                   ~filename ) )
+                (process_reader ~inode:(Core.Unix.stat filename).st_ino
+                   ~stop_on_eof:without_rotation ~rotated ~filename ) )
       in
       match result with
       | Ok `File_rotated when without_rotation ->
-        printf "Done processing rotated file %s...\n%!" filename ;
-        Deferred.unit
+          printf "Done processing rotated file %s...\n%!" filename ;
+          Deferred.unit
+      | Ok `Eof_reached ->
+          printf "Done processing rotated file %s...\n%!" filename ;
+          Deferred.unit
       | Ok `File_rotated ->
           printf "File rotated, re-opening %s...\n%!" filename ;
           let%bind () = Clock.after (Time.Span.of_sec 2.0) in
@@ -127,15 +131,15 @@ struct
           let%bind () = Clock.after (Time.Span.of_sec 5.0) in
           loop rotated
     in
+    printf "Begin processing trace file: %s\n%!" filename;
     loop false
 
   let process_roated_files filename =
     Deferred.List.iter ~how:`Sequential (List.range 0 100) ~f:(fun n ->
-      let filename_n = sprintf "%s.%d" filename n in
-      try
-        let _stat = Core.Unix.stat filename_n in
-        process_file ~without_rotation:true filename_n
-      with Core.Unix.Unix_error _ ->
-        Deferred.unit
-      )
+        let filename_n = sprintf "%s.%d" filename n in
+        try
+          let _stat = Core.Unix.stat filename_n in
+          printf "Begin processing rotated file: %s\n%!" filename_n ;
+          process_file ~without_rotation:true filename_n
+        with Core.Unix.Unix_error _ -> Deferred.unit )
 end

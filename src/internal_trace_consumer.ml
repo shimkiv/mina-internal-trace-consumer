@@ -173,7 +173,7 @@ module Main_handler = struct
   let process_control control data =
     match control with
     | "current_block" ->
-        current_block := Yojson.Safe.Util.to_string data ;
+        current_block := Yojson.Safe.Util.to_string data
     | "metadata" ->
         Block_tracing.push_metadata ~block_id:!current_block
           (Yojson.Safe.Util.to_assoc data)
@@ -196,7 +196,12 @@ module Main_handler = struct
     String.Table.clear verifier_calls_context_block ;
     String.Table.clear prover_calls_context_block
 
+  let main_trace_synced = Ivar.create ()
+
+  let synced () = Ivar.read main_trace_synced
+
   let eof_reached () =
+    Ivar.fill_if_empty main_trace_synced () ;
     process_pending_entries ~context_blocks:prover_calls_context_block
       Pending.prover_entries ;
     process_pending_entries ~context_blocks:verifier_calls_context_block
@@ -282,20 +287,25 @@ let serve =
          prover_trace_file_path ;
        printf "Consuming verifier trace events from file: %s\n%!"
          verifier_trace_file_path ;
-       (* First we process the old rotated files *)
        let%bind () =
          Main_trace_processor.process_roated_files main_trace_file_path
-       and () =
-         Prover_trace_processor.process_roated_files prover_trace_file_path
-       and () =
-         Verifier_trace_processor.process_roated_files verifier_trace_file_path
        in
-       (* Then the main files *)
        let%bind () = Main_trace_processor.process_file main_trace_file_path
-       and () = Prover_trace_processor.process_file prover_trace_file_path
        and () =
+         let%bind () = Main_handler.synced () in
+         let%bind () =
+           Prover_trace_processor.process_roated_files verifier_trace_file_path
+         in
+         Prover_trace_processor.process_file verifier_trace_file_path
+       and () =
+         let%bind () = Main_handler.synced () in
+         let%bind () =
+           Verifier_trace_processor.process_roated_files
+             verifier_trace_file_path
+         in
          Verifier_trace_processor.process_file verifier_trace_file_path
        in
+
        printf "Done\n%!" ; Deferred.unit )
 
 let commands = [ ("serve", serve) ]
