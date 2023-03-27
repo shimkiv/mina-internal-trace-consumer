@@ -207,7 +207,7 @@ let external_source_checkpoints =
   ; "Failure"
   ]
 
-let is_external_checkpoint =
+let _is_external_checkpoint =
   List.mem external_source_checkpoints ~equal:String.equal
 
 let compute_source : Checkpoint.t -> Trace.block_source = function
@@ -219,8 +219,8 @@ let compute_source : Checkpoint.t -> Trace.block_source = function
       `Catchup
   | "Loaded_transition_from_storage" ->
       `Reconstruct
-  | external_checkpoint when is_external_checkpoint external_checkpoint ->
-      `External
+  (*| external_checkpoint when is_external_checkpoint external_checkpoint ->
+      `External*)
   | _ ->
       `Unknown
 
