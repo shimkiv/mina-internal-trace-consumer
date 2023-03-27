@@ -131,7 +131,7 @@ struct
           let%bind () = Clock.after (Time.Span.of_sec 5.0) in
           loop rotated
     in
-    printf "Begin processing trace file: %s\n%!" filename;
+    printf "Begin processing trace file: %s\n%!" filename ;
     loop false
 
   let process_roated_files filename =

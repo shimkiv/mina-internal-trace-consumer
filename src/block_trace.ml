@@ -17,6 +17,8 @@ module Entry = struct
     { checkpoint; started_at; duration; metadata = `Assoc metadata }
 end
 
+type insert_order = [ `Append | `Chronological_after of string ]
+
 type block_source =
   [ `External | `Internal | `Catchup | `Reconstruct | `Unknown ]
 [@@deriving to_yojson, equal]
@@ -86,25 +88,41 @@ let push_global_metadata ~metadata trace =
         ; metadata = Yojson.Safe.Util.combine trace.metadata (`Assoc metadata)
         }
 
-let push ~status ~source ~ordered ?blockchain_length entry trace =
-  match trace with
-  | None ->
+let readjust_from_previous orig_after orig_before prev_checkpoint =
+  if String.is_empty prev_checkpoint then (orig_after, orig_before)
+  else
+    let after, before =
+      List.split_while orig_before ~f:(fun previous_entry ->
+          not (String.equal previous_entry.Entry.checkpoint prev_checkpoint) )
+    in
+    (orig_after @ after, before)
+
+let push ~status ~source ~order ?blockchain_length entry trace =
+  match (trace, order) with
+  | None, _ ->
       let trace = empty ?blockchain_length source in
       { trace with checkpoints = [ entry ]; status }
-  | Some ({ checkpoints = []; _ } as trace) ->
+  | Some ({ checkpoints = []; _ } as trace), _ ->
       { trace with checkpoints = [ entry ]; status }
-  | Some ({ checkpoints; _ } as trace) when ordered ->
+  | Some ({ checkpoints; _ } as trace), `Chronological_after prev_checkpoint ->
       let after, before =
         List.split_while checkpoints ~f:(fun previous_entry ->
             Float.(previous_entry.started_at >= entry.started_at) )
       in
+      let after, before = readjust_from_previous after before prev_checkpoint in
       let previous, before = (List.hd_exn before, List.tl_exn before) in
+      if
+        (not (String.is_empty prev_checkpoint))
+        && not (String.equal previous.checkpoint prev_checkpoint)
+      then
+        eprintf "[ERROR] expected previous checkpoint %s but got %s\n%!"
+          prev_checkpoint previous.checkpoint ;
       let previous =
         { previous with duration = entry.started_at -. previous.started_at }
       in
       (* FIXME: set duration for the new added entry *)
       { trace with checkpoints = after @ (entry :: previous :: before) }
-  | Some ({ checkpoints = previous :: rest; _ } as trace)
+  | Some ({ checkpoints = previous :: rest; _ } as trace), _
     when equal_status trace.status `Pending
          || not (equal_block_source source `External) ->
       (* Only add checkpoints to the main list if processing has not been completed before *)
@@ -113,9 +131,9 @@ let push ~status ~source ~ordered ?blockchain_length entry trace =
       in
       let total_time = trace.total_time +. previous.duration in
       { trace with checkpoints = entry :: previous :: rest; status; total_time }
-  | Some ({ other_checkpoints = []; _ } as trace) ->
+  | Some ({ other_checkpoints = []; _ } as trace), _ ->
       { trace with other_checkpoints = [ entry ] }
-  | Some ({ other_checkpoints = previous :: rest; _ } as trace) ->
+  | Some ({ other_checkpoints = previous :: rest; _ } as trace), _ ->
       let previous =
         { previous with duration = entry.started_at -. previous.started_at }
       in

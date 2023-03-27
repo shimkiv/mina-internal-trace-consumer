@@ -174,9 +174,9 @@ module Registry = struct
         in
         { traces; produced_traces }
 
-  let push_entry ~status ~source ~ordered ?blockchain_length block_id entry =
+  let push_entry ~status ~source ~order ?blockchain_length block_id entry =
     Hashtbl.update registry block_id
-      ~f:(Trace.push ~status ~source ~ordered ?blockchain_length entry)
+      ~f:(Trace.push ~status ~source ~order ?blockchain_length entry)
 
   let push_metadata ~metadata block_id =
     Hashtbl.change registry block_id ~f:(Trace.push_metadata ~metadata)
@@ -222,7 +222,7 @@ let handle_status_change status block_id =
       ()
 
 let checkpoint ?status ?metadata ?blockchain_length ~block_id ?source
-    ?(ordered = false) ~checkpoint ~timestamp () =
+    ?(order = `Append) ~checkpoint ~timestamp () =
   let source =
     match source with
     | None ->
@@ -239,7 +239,7 @@ let checkpoint ?status ?metadata ?blockchain_length ~block_id ?source
   in
   handle_status_change status block_id ;
   let entry = Trace.Entry.make ?metadata ~timestamp checkpoint in
-  Registry.push_entry ~status ~source ~ordered ?blockchain_length block_id entry ;
+  Registry.push_entry ~status ~source ~order ?blockchain_length block_id entry ;
   entry
 
 let failure ~reason =
