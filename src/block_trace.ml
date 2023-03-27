@@ -35,7 +35,7 @@ type t =
   ; checkpoints : Entry.t list
   ; other_checkpoints : Entry.t list
   ; status : status
-  ; total_time : float
+  ; mutable total_time : float
   ; metadata : Yojson.Safe.t
   }
 [@@deriving to_yojson]
@@ -53,8 +53,21 @@ let empty ?(blockchain_length = 0) source =
 let to_yojson t = to_yojson { t with checkpoints = List.rev t.checkpoints }
 
 let started_at t =
-  List.hd t.checkpoints
-  |> Option.value_map ~default:(-1.0) ~f:(fun cp -> cp.started_at)
+  if equal_status `Success t.status then
+    List.hd t.checkpoints
+    |> Option.value_map ~default:(-1.0) ~f:(fun cp ->
+           cp.started_at -. t.total_time )
+  else
+    List.last t.checkpoints
+    |> Option.value_map ~default:(-1.0) ~f:(fun cp -> cp.started_at)
+
+let recalculate_total trace =
+  try
+    let started_at = (List.last_exn trace.checkpoints).started_at in
+    let finished_at = (List.hd_exn trace.checkpoints).started_at in
+    trace.total_time <- finished_at -. started_at
+  with _ ->
+    eprintf "[WARN] failure when trying to recalculate trace total time\n%!"
 
 let push_metadata ~metadata trace =
   match trace with
