@@ -132,8 +132,8 @@ let push ~status ~source ~order ?blockchain_length entry trace =
       (* FIXME: set duration for the new added entry *)
       { trace with checkpoints = after @ (entry :: previous :: before) }
   | Some ({ checkpoints = previous :: rest; _ } as trace), _
-    when equal_status trace.status `Pending
-         || not (equal_block_source source `External) ->
+    when not (equal_status trace.status `Success)
+         (* || not (equal_block_source source `External) *) ->
       (* Only add checkpoints to the main list if processing has not been completed before *)
       let previous =
         { previous with duration = entry.started_at -. previous.started_at }
