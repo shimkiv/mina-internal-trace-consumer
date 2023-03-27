@@ -116,21 +116,31 @@ let push ~status ~source ~order ?blockchain_length entry trace =
       { trace with checkpoints = [ entry ]; status }
   | Some ({ checkpoints = []; _ } as trace), _ ->
       { trace with checkpoints = [ entry ]; status }
-  | Some ({ checkpoints; _ } as trace), `Chronological_after prev_checkpoint ->
+  | Some ({ checkpoints; _ } as trace), `Chronological_after prev_checkpoint
+    -> (
       let after, before =
         List.split_while checkpoints ~f:(fun previous_entry ->
             Float.(previous_entry.started_at >= entry.started_at) )
       in
       let after, before = readjust_from_previous after before prev_checkpoint in
-      let previous, before = (List.hd_exn before, List.tl_exn before) in
-      if not (String.equal previous.checkpoint prev_checkpoint) then
-        eprintf "[ERROR] expected previous checkpoint %s but got %s\n%!"
-          prev_checkpoint previous.checkpoint ;
-      let previous =
-        { previous with duration = entry.started_at -. previous.started_at }
-      in
-      (* FIXME: set duration for the new added entry *)
-      { trace with checkpoints = after @ (entry :: previous :: before) }
+      try
+        let previous, before = (List.hd_exn before, List.tl_exn before) in
+        if not (String.equal previous.checkpoint prev_checkpoint) then
+          eprintf "[ERROR] expected previous checkpoint %s but got %s\n%!"
+            prev_checkpoint previous.checkpoint ;
+        let previous =
+          { previous with duration = entry.started_at -. previous.started_at }
+        in
+        (* FIXME: set duration for the new added entry *)
+        { trace with checkpoints = after @ (entry :: previous :: before) }
+      with _ ->
+        (*printf
+          "[ERROR] when trying to add checkpoint %s after %s @ %f for block \
+           length %d\n\
+           %!"
+          entry.checkpoint prev_checkpoint entry.started_at
+          trace.blockchain_length ;*)
+        trace )
   | Some ({ checkpoints = previous :: rest; _ } as trace), _
     when not (equal_status trace.status `Success)
          (* || not (equal_block_source source `External) *) ->

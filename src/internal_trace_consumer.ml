@@ -145,13 +145,21 @@ let process_pending_entries ~context_blocks
                         ~parent_checkpoint pending_entries ;
                       false
                   | None ->
-                      true )
+                      (* Could not find a block to attach although data is ready, drop *)
+                      false )
               | None ->
+                  (* Could not find related block because data is not ready yet,
+                     wait and try again later *)
                   true )
           | _ ->
+              (* Still not complete, wait and try again later *)
               true )
       | _ ->
-          true (* TODO: warning, this shouldn't happen *) )
+          eprintf
+            "[WARN] unexpected non-checkpoint entry found as first element in \
+             pending trace\n\
+             %!" ;
+          false )
 
 module Main_handler = struct
   let handle_verifier_and_prover_call_checkpoints checkpoint timestamp =
@@ -210,10 +218,20 @@ module Main_handler = struct
   let synced () = Ivar.read main_trace_synced
 
   let eof_reached () =
+    (*let before_prover_entries = Int.Table.length Pending.prover_entries in
+      let before_verifier_entries = Int.Table.length Pending.verifier_entries in
+      let before_time = Unix.gettimeofday () in*)
     process_pending_entries ~context_blocks:prover_calls_context_block
       Pending.prover_entries ;
     process_pending_entries ~context_blocks:verifier_calls_context_block
       Pending.verifier_entries ;
+    (*let after_prover_entries = Int.Table.length Pending.prover_entries in
+      let after_verifier_entries = Int.Table.length Pending.verifier_entries in
+      let after_time = Unix.gettimeofday () in
+      printf "Processed pending entries: verifier=%d->%d prover=%d->%d in %fs\n%!"
+        before_prover_entries after_prover_entries before_verifier_entries
+        after_verifier_entries
+        (after_time -. before_time) ;*)
     Ivar.fill_if_empty main_trace_synced ()
 end
 
