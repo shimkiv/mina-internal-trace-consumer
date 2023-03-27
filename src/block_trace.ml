@@ -89,13 +89,11 @@ let push_global_metadata ~metadata trace =
         }
 
 let readjust_from_previous orig_after orig_before prev_checkpoint =
-  if String.is_empty prev_checkpoint then (orig_after, orig_before)
-  else
-    let after, before =
-      List.split_while orig_before ~f:(fun previous_entry ->
-          not (String.equal previous_entry.Entry.checkpoint prev_checkpoint) )
-    in
-    (orig_after @ after, before)
+  let after, before =
+    List.split_while orig_before ~f:(fun previous_entry ->
+        not (String.equal previous_entry.Entry.checkpoint prev_checkpoint) )
+  in
+  (orig_after @ after, before)
 
 let push ~status ~source ~order ?blockchain_length entry trace =
   match (trace, order) with
@@ -111,10 +109,7 @@ let push ~status ~source ~order ?blockchain_length entry trace =
       in
       let after, before = readjust_from_previous after before prev_checkpoint in
       let previous, before = (List.hd_exn before, List.tl_exn before) in
-      if
-        (not (String.is_empty prev_checkpoint))
-        && not (String.equal previous.checkpoint prev_checkpoint)
-      then
+      if not (String.equal previous.checkpoint prev_checkpoint) then
         eprintf "[ERROR] expected previous checkpoint %s but got %s\n%!"
           prev_checkpoint previous.checkpoint ;
       let previous =

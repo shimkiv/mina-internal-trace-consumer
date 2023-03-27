@@ -134,10 +134,10 @@ let checkpoint_children (c : Checkpoint.t) : Checkpoint.t list =
       ; "Backend_tock_proof_create_async"
       ; "Backend_tock_proof_create_async_done"
       ]
-  | "Backend_tick_proof_create_async" | "Backend_tock_proof_create_async" ->
-      [ "Kimchi_pasta_fp_plonk_proof_create"
-      ; "Kimchi_pasta_fq_plonk_proof_create"
-      ]
+  | "Backend_tick_proof_create_async" ->
+      [ "Kimchi_pasta_fp_plonk_proof_create" ]
+  | "Backend_tock_proof_create_async" ->
+      [ "Kimchi_pasta_fq_plonk_proof_create" ]
   | "Kimchi_pasta_fp_plonk_proof_create" | "Kimchi_pasta_fq_plonk_proof_create"
     ->
       [ "Kimchi_create_recursive"; "Kimchi_create_recursive_done" ]

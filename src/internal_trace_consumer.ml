@@ -53,7 +53,8 @@ let find_nearest_block ~context_blocks timestamp =
   List.find_map context_blocks ~f:(fun (block, switch_timestamp) ->
       if Float.(timestamp >= switch_timestamp) then Some block else None )
 
-let push_kimchi_checkpoints_from_metadata ~block_id (metadata : Yojson.Safe.t) =
+let push_kimchi_checkpoints_from_metadata ~block_id parent_entry
+    (metadata : Yojson.Safe.t) =
   try
     let checkpoints =
       let open Yojson.Safe.Util in
@@ -70,13 +71,14 @@ let push_kimchi_checkpoints_from_metadata ~block_id (metadata : Yojson.Safe.t) =
           | _ ->
               failwith "got malformed kimchi checkpoints" )
     in
-    let current_entry = ref (Block_trace.Entry.make ~timestamp:0.0 "") in
+    let current_entry = ref parent_entry in
     List.iter checkpoints ~f:(function
       | `Checkpoint (checkpoint, timestamp) ->
           let checkpoint = "Kimchi_" ^ checkpoint in
+          let prev_checkpoint = !current_entry.Block_trace.Entry.checkpoint in
           current_entry :=
             Block_tracing.record ~block_id ~checkpoint ~timestamp
-              ~order:(`Chronological_after !current_entry.checkpoint) ()
+              ~order:(`Chronological_after prev_checkpoint) ()
       | `Metadata metadata ->
           !current_entry.metadata <- `Assoc metadata )
   with exn ->
@@ -86,6 +88,8 @@ let push_kimchi_checkpoints_from_metadata ~block_id (metadata : Yojson.Safe.t) =
 
 let add_pending_entries_to_block_trace ~block_id ~parent_checkpoint
     pending_entries =
+  (* these must be processed at the end *)
+  let pending_kimchi_entries = ref [] in
   let rec loop ~previous_checkpoint entries current_entry =
     match entries with
     | Pending.Checkpoint (checkpoint, timestamp) :: entries ->
@@ -100,7 +104,9 @@ let add_pending_entries_to_block_trace ~block_id ~parent_checkpoint
             current_entry.checkpoint
           || String.equal "Backend_tock_proof_create_async"
                current_entry.checkpoint
-        then push_kimchi_checkpoints_from_metadata ~block_id data
+        then
+          pending_kimchi_entries :=
+            (current_entry, data) :: !pending_kimchi_entries
         else
           current_entry.metadata <-
             Yojson.Safe.Util.combine current_entry.metadata data ;
@@ -109,7 +115,8 @@ let add_pending_entries_to_block_trace ~block_id ~parent_checkpoint
         (* printf "Ignoring control %s\n%!" other ; *)
         loop ~previous_checkpoint entries current_entry
     | [] ->
-        ()
+        List.iter !pending_kimchi_entries ~f:(fun (parent_entry, data) ->
+            push_kimchi_checkpoints_from_metadata ~block_id parent_entry data )
   in
   loop ~previous_checkpoint:parent_checkpoint pending_entries
     (Block_trace.Entry.make ~timestamp:0.0 "")
