@@ -236,7 +236,7 @@ let handle_status_change status block_id =
   match (status, Hashtbl.find Registry.registry block_id) with
   | `Success, Some trace
     when not @@ Trace.equal_status trace.Trace.status `Success ->
-      Block_trace.recalculate_total trace;
+      Block_trace.recalculate_total trace ;
       let structured = Structured_trace.of_flat_trace trace in
       Distributions.integrate_trace structured
   | _ ->

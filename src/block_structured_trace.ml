@@ -6,7 +6,7 @@ module Entry = struct
   type t =
     { checkpoint : Checkpoint.t
     ; started_at : float
-    ; duration : float
+    ; mutable duration : float
     ; metadata : Yojson.Safe.t
     ; checkpoints : t list
     }
@@ -311,6 +311,22 @@ let adjust_transition_accepted_checkpoint (checkpoints_rev : Trace.Entry.t list)
   | _ ->
       checkpoints_rev
 
+let adjust_durations (checkpoints : Entry.t list) =
+  let rec loop checkpoints ended_at =
+    match checkpoints with
+    | first :: next :: rest ->
+        loop first.Entry.checkpoints next.started_at ;
+        loop (next :: rest) ended_at
+    | [ checkpoint ] ->
+        checkpoint.duration <- ended_at -. checkpoint.started_at ;
+        loop checkpoint.Entry.checkpoints ended_at
+    | [] ->
+        ()
+  in
+  let last_checkpoint = List.last_exn checkpoints in
+  loop checkpoints (last_checkpoint.started_at +. last_checkpoint.duration) ;
+  checkpoints
+
 let of_flat_trace trace =
   let { Trace.source
       ; blockchain_length
@@ -324,6 +340,7 @@ let of_flat_trace trace =
   in
   let checkpoints = adjust_transition_accepted_checkpoint checkpoints in
   let checkpoints = structure_checkpoints checkpoints in
+  let checkpoints = adjust_durations checkpoints in
   (* TODO: complete sections or remove (probably remove, not useful anymore) *)
   let section = { title = "All"; checkpoints } in
   let sections = [ section ] in
