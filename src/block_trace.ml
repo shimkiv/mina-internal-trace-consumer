@@ -59,7 +59,21 @@ let started_at t =
 let push_metadata ~metadata trace =
   match trace with
   | None | Some { checkpoints = []; _ } ->
-      trace (* do nothing *)
+      trace
+  | Some
+      ( { checkpoints = previous :: _
+        ; other_checkpoints = other_previous :: other_rest
+        ; _
+        } as trace )
+    when Float.(other_previous.started_at > previous.started_at) ->
+      (* If the last checkpoint is in other traces we have to attach metadata there *)
+      let other_previous =
+        { other_previous with
+          metadata =
+            Yojson.Safe.Util.combine other_previous.metadata (`Assoc metadata)
+        }
+      in
+      Some { trace with other_checkpoints = other_previous :: other_rest }
   | Some ({ checkpoints = previous :: rest; _ } as trace) ->
       let previous =
         { previous with

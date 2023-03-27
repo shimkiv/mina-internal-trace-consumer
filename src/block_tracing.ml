@@ -192,6 +192,24 @@ module Registry = struct
         ()
 end
 
+let external_source_checkpoints =
+  [ "External_block_received"
+  ; "Initial_validation"
+  ; "Verify_blockchain_snarks"
+  ; "Verify_blockchain_snarks_done"
+  ; "Initial_validation_done"
+  ; "Validate_transition"
+  ; "Check_transition_not_in_frontier"
+  ; "Check_transition_not_in_process"
+  ; "Check_transition_can_be_connected"
+  ; "Register_transition_for_processing"
+  ; "Validate_transition_done"
+  ; "Failure"
+  ]
+
+let is_external_checkpoint =
+  List.mem external_source_checkpoints ~equal:String.equal
+
 let compute_source : Checkpoint.t -> Trace.block_source = function
   | "External_block_received" ->
       `External
@@ -201,6 +219,8 @@ let compute_source : Checkpoint.t -> Trace.block_source = function
       `Catchup
   | "Loaded_transition_from_storage" ->
       `Reconstruct
+  | external_checkpoint when is_external_checkpoint external_checkpoint ->
+      `External
   | _ ->
       `Unknown
 
