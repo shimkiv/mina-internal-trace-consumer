@@ -258,9 +258,9 @@ let checkpoint ?status ?metadata ?blockchain_length ~block_id ?source
     | None ->
         compute_status checkpoint
   in
+  handle_status_change status block_id ;
   let entry = Trace.Entry.make ?metadata ~timestamp checkpoint in
   Registry.push_entry ~status ~source ~order ?blockchain_length block_id entry ;
-  handle_status_change status block_id ;
   entry
 
 let failure ~reason =
