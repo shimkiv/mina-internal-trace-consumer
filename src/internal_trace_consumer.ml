@@ -42,6 +42,8 @@ module Pending = struct
         Some ("Produce_state_transition_proof", "Prover_extend_blockchain_done")
     | _ ->
         None
+
+  let timestamp = function Checkpoint (_, timestamp) -> timestamp | _ -> -1.0
 end
 
 let push_pending_entry table call_id (entry : Pending.t) =
@@ -118,8 +120,16 @@ let add_pending_entries_to_block_trace ~block_id ~parent_checkpoint
         List.iter !pending_kimchi_entries ~f:(fun (parent_entry, data) ->
             push_kimchi_checkpoints_from_metadata ~block_id parent_entry data )
   in
-  loop ~previous_checkpoint:parent_checkpoint pending_entries
-    (Block_trace.Entry.make ~timestamp:0.0 "")
+  let timestamp = Pending.timestamp (List.last_exn pending_entries) in
+  match
+    Block_tracing.nearest_trace ~prev_checkpoint:parent_checkpoint ~timestamp
+      block_id
+  with
+  | `Main ->
+      loop ~previous_checkpoint:parent_checkpoint pending_entries
+        (Block_trace.Entry.make ~timestamp:0.0 "")
+  | `Other ->
+      ()
 
 (* Pending, complete verifier/prover traces are matched to a block trace by their timestamp
    and expected parent call (a checkpoint in the main trace). Once added they are removed
@@ -221,6 +231,7 @@ module Main_handler = struct
     (*let before_prover_entries = Int.Table.length Pending.prover_entries in
       let before_verifier_entries = Int.Table.length Pending.verifier_entries in
       let before_time = Unix.gettimeofday () in*)
+    (* TODO: these are not integrated into the checkpoints histogram *)
     process_pending_entries ~context_blocks:prover_calls_context_block
       Pending.prover_entries ;
     process_pending_entries ~context_blocks:verifier_calls_context_block

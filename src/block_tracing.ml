@@ -258,9 +258,9 @@ let checkpoint ?status ?metadata ?blockchain_length ~block_id ?source
     | None ->
         compute_status checkpoint
   in
-  handle_status_change status block_id ;
   let entry = Trace.Entry.make ?metadata ~timestamp checkpoint in
   Registry.push_entry ~status ~source ~order ?blockchain_length block_id entry ;
+  handle_status_change status block_id ;
   entry
 
 let failure ~reason =
@@ -279,3 +279,26 @@ let set_produced_block_state_hash ~block_id state_hash =
 let record = checkpoint
 
 let record_failure = failure
+
+let nearest_trace ~prev_checkpoint ~timestamp block_id =
+  let trace = Option.value_exn @@ Registry.find_trace block_id in
+  let { Trace.checkpoints; other_checkpoints; _ } = trace in
+  let left =
+    List.find checkpoints ~f:(fun cp ->
+        Float.(cp.Trace.Entry.started_at <= timestamp)
+        && String.equal cp.checkpoint prev_checkpoint )
+  in
+  let right =
+    List.find other_checkpoints ~f:(fun cp ->
+        Float.(cp.Trace.Entry.started_at <= timestamp)
+        && String.equal cp.checkpoint prev_checkpoint )
+  in
+  match (left, right) with
+  | None, None ->
+      `Main
+  | Some _, None ->
+      `Main
+  | None, Some _ ->
+      `Other
+  | Some lcp, Some rcp ->
+      if Float.(lcp.started_at > rcp.started_at) then `Main else `Other
