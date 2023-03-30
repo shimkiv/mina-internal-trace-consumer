@@ -94,9 +94,11 @@ module Registry = struct
 
   let find_trace state_hash = Hashtbl.find registry state_hash
 
-  let all_traces ?max_length ?height () =
-    let matches_height blockchain_length =
-      Option.value_map ~default:true ~f:(( = ) blockchain_length) height
+  let all_traces ?max_length ?(offset = 0) ?height ?(chain_length = 1) () =
+    let in_height_range blockchain_length =
+      let requested = Option.value ~default:blockchain_length height in
+      blockchain_length <= requested
+      && blockchain_length > requested - chain_length
     in
     let traces =
       Hashtbl.to_alist registry
@@ -115,7 +117,7 @@ module Registry = struct
                        } =
                    item
                  in
-                 if matches_height blockchain_length then
+                 if in_height_range blockchain_length then
                    Some
                      { state_hash
                      ; blockchain_length
@@ -130,7 +132,8 @@ module Registry = struct
     let traces =
       traces
       |> List.sort ~compare:(fun a b ->
-             Int.compare a.blockchain_length b.blockchain_length )
+             Int.compare b.blockchain_length a.blockchain_length )
+      |> Fn.flip List.drop offset
     in
     let produced_traces =
       Hashtbl.to_alist registry
@@ -160,18 +163,15 @@ module Registry = struct
                    ; metadata
                    } )
       |> List.sort ~compare:(fun a b ->
-             Int.compare a.blockchain_length b.blockchain_length )
+             Int.compare b.blockchain_length a.blockchain_length )
+      |> Fn.flip List.drop offset
     in
     match max_length with
     | None ->
         { traces; produced_traces }
     | Some max_length ->
-        let traces_count = List.length traces in
-        let produced_traces_count = List.length produced_traces in
-        let traces = List.drop traces (traces_count - max_length) in
-        let produced_traces =
-          List.drop produced_traces (produced_traces_count - max_length)
-        in
+        let traces = List.take traces max_length in
+        let produced_traces = List.take produced_traces max_length in
         { traces; produced_traces }
 
   let push_entry ~status ~source ~order ?blockchain_length block_id entry =

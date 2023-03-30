@@ -44,11 +44,22 @@ module Queries = struct
         Arg.
           [ arg "maxLength" ~doc:"The maximum number of block traces to return."
               ~typ:int
-          ; arg "height" ~doc:"Only return traces with matching height."
+          ; arg "offset"
+              ~doc:
+                "Amount of traces to skip when producing the list of results."
+              ~typ:int
+          ; arg "height" ~doc:"Return traces with matching height." ~typ:int
+          ; arg "chainLength"
+              ~doc:
+                "When filtering by height, this controls the chain lenght so \
+                 that parent blocks can be included too."
               ~typ:int
           ]
-      ~resolve:(fun _info () max_length height ->
-        let traces = Block_tracing.Registry.all_traces ?max_length ?height () in
+      ~resolve:(fun _info () max_length offset height chain_length ->
+        let traces =
+          Block_tracing.Registry.all_traces ?max_length ?offset ?height
+            ?chain_length ()
+        in
         Block_tracing.Registry.traces_to_yojson traces |> Yojson.Safe.to_basic
         )
 
