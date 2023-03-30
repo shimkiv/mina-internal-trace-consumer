@@ -94,11 +94,19 @@ module Registry = struct
 
   let find_trace state_hash = Hashtbl.find registry state_hash
 
-  let all_traces ?max_length ?(offset = 0) ?height ?(chain_length = 1) () =
+  let all_traces ?max_length ?(offset = 0) ?height ?(chain_length = 1)
+      ?(order = `Asc) () =
     let in_height_range blockchain_length =
       let requested = Option.value ~default:blockchain_length height in
       blockchain_length <= requested
       && blockchain_length > requested - chain_length
+    in
+    let compare_trace =
+      match order with
+      | `Asc ->
+          fun a b -> Int.compare a.blockchain_length b.blockchain_length
+      | `Desc ->
+          fun b a -> Int.compare a.blockchain_length b.blockchain_length
     in
     let traces =
       Hashtbl.to_alist registry
@@ -130,10 +138,7 @@ module Registry = struct
                  else None )
     in
     let traces =
-      traces
-      |> List.sort ~compare:(fun a b ->
-             Int.compare b.blockchain_length a.blockchain_length )
-      |> Fn.flip List.drop offset
+      traces |> List.sort ~compare:compare_trace |> Fn.flip List.drop offset
     in
     let produced_traces =
       Hashtbl.to_alist registry
@@ -162,8 +167,7 @@ module Registry = struct
                    ; total_time
                    ; metadata
                    } )
-      |> List.sort ~compare:(fun a b ->
-             Int.compare b.blockchain_length a.blockchain_length )
+      |> List.sort ~compare:compare_trace
       |> Fn.flip List.drop offset
     in
     match max_length with

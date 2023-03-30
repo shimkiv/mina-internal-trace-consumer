@@ -20,6 +20,13 @@ module Queries = struct
 
   let json_type : (unit, JSON.t option) typ = JSON.typ ()
 
+  let order =
+    Arg.enum "Results order"
+      ~values:
+        [ enum_value ~doc:"Ascending order" "Ascending" ~value:`Asc
+        ; enum_value ~doc:"Descending order" "Descending" ~value:`Desc
+        ]
+
   let get_block_trace =
     field "blockTrace" ~doc:"Block trace" ~typ:json_type
       ~args:Arg.[ arg "block_identifier" ~typ:(non_null string) ]
@@ -54,11 +61,14 @@ module Queries = struct
                 "When filtering by height, this controls the chain lenght so \
                  that parent blocks can be included too."
               ~typ:int
+          ; arg "order"
+              ~doc:"Results order (by blockchain_length. Ascending by default)."
+              ~typ:order
           ]
-      ~resolve:(fun _info () max_length offset height chain_length ->
+      ~resolve:(fun _info () max_length offset height chain_length order ->
         let traces =
           Block_tracing.Registry.all_traces ?max_length ?offset ?height
-            ?chain_length ()
+            ?chain_length ?order ()
         in
         Block_tracing.Registry.traces_to_yojson traces |> Yojson.Safe.to_basic
         )
