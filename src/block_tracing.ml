@@ -61,6 +61,7 @@ module Registry = struct
   type trace_info =
     { source : Trace.block_source
     ; blockchain_length : int
+    ; global_slot : int
     ; state_hash : string
     ; status : Trace.status
     ; started_at : float
@@ -94,12 +95,16 @@ module Registry = struct
 
   let find_trace state_hash = Hashtbl.find registry state_hash
 
-  let all_traces ?max_length ?(offset = 0) ?height ?(chain_length = 1)
-      ?(order = `Asc) () =
-    let in_height_range blockchain_length =
-      let requested = Option.value ~default:blockchain_length height in
-      blockchain_length <= requested
-      && blockchain_length > requested - chain_length
+  let all_traces ?max_length ?(offset = 0) ?height
+      ?global_slot:wanted_global_slot ?(chain_length = 1) ?(order = `Asc) () =
+    let in_requested_range ~blockchain_length ~global_slot =
+      match wanted_global_slot with
+      | Some wanted_global_slot ->
+          global_slot = wanted_global_slot
+      | None ->
+          let requested = Option.value ~default:blockchain_length height in
+          blockchain_length <= requested
+          && blockchain_length > requested - chain_length
     in
     let compare_trace =
       match order with
@@ -117,6 +122,7 @@ module Registry = struct
              | state_hash ->
                  let Trace.
                        { blockchain_length
+                       ; global_slot
                        ; source
                        ; status
                        ; total_time
@@ -125,10 +131,11 @@ module Registry = struct
                        } =
                    item
                  in
-                 if in_height_range blockchain_length then
+                 if in_requested_range ~blockchain_length ~global_slot then
                    Some
                      { state_hash
                      ; blockchain_length
+                     ; global_slot
                      ; source
                      ; status
                      ; started_at = Trace.started_at item
@@ -158,9 +165,16 @@ module Registry = struct
                        } =
                    item
                  in
+                 let global_slot =
+                   try
+                     Yojson.Safe.Util.to_int
+                       (Yojson.Safe.Util.member "global_slot" metadata)
+                   with _ -> 0
+                 in
                  Some
                    { state_hash
                    ; blockchain_length
+                   ; global_slot
                    ; source
                    ; status
                    ; started_at = Trace.started_at item

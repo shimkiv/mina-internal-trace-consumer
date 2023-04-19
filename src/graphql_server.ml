@@ -56,6 +56,8 @@ module Queries = struct
                 "Amount of traces to skip when producing the list of results."
               ~typ:int
           ; arg "height" ~doc:"Return traces with matching height." ~typ:int
+          ; arg "global_slot" ~doc:"Return traces with matching global_slot."
+              ~typ:int
           ; arg "chainLength"
               ~doc:
                 "When filtering by height, this controls the chain lenght so \
@@ -65,10 +67,11 @@ module Queries = struct
               ~doc:"Results order (by blockchain_length. Ascending by default)."
               ~typ:order
           ]
-      ~resolve:(fun _info () max_length offset height chain_length order ->
+      ~resolve:(fun _info () max_length offset height global_slot chain_length
+                    order ->
         let traces =
           Block_tracing.Registry.all_traces ?max_length ?offset ?height
-            ?chain_length ?order ()
+            ?global_slot ?chain_length ?order ()
         in
         Block_tracing.Registry.traces_to_yojson traces |> Yojson.Safe.to_basic
         )

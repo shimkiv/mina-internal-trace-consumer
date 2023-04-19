@@ -23,6 +23,7 @@ type section = { title : string; checkpoints : Entry.t list }
 type t =
   { source : Trace.block_source
   ; blockchain_length : int
+  ; global_slot : int
   ; sections : section list
   ; status : Trace.status
   ; total_time : float
@@ -330,6 +331,7 @@ let adjust_durations (checkpoints : Entry.t list) =
 let of_flat_trace trace =
   let { Trace.source
       ; blockchain_length
+      ; global_slot
       ; status
       ; checkpoints
       ; other_checkpoints = _
@@ -344,4 +346,11 @@ let of_flat_trace trace =
   (* TODO: complete sections or remove (probably remove, not useful anymore) *)
   let section = { title = "All"; checkpoints } in
   let sections = [ section ] in
-  { source; blockchain_length; sections; status; total_time; metadata }
+  { source
+  ; blockchain_length
+  ; global_slot
+  ; sections
+  ; status
+  ; total_time
+  ; metadata
+  }

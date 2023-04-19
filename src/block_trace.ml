@@ -32,6 +32,7 @@ let status_to_yojson = Util.flatten_yojson_variant status_to_yojson
 type t =
   { source : block_source
   ; blockchain_length : int
+  ; global_slot : int
   ; checkpoints : Entry.t list
   ; other_checkpoints : Entry.t list
   ; status : status
@@ -43,6 +44,7 @@ type t =
 let empty ?(blockchain_length = 0) source =
   { source
   ; blockchain_length
+  ; global_slot = 0
   ; checkpoints = []
   ; other_checkpoints = []
   ; status = `Pending
@@ -100,6 +102,11 @@ let extract_blockchain_length metadata =
   |> Option.bind ~f:(fun json -> Yojson.Safe.Util.to_string_option json)
   |> Option.map ~f:Int.of_string
 
+let extract_global_slot metadata =
+  List.Assoc.find metadata ~equal:String.equal "global_slot"
+  |> Option.bind ~f:(fun json -> Yojson.Safe.Util.to_string_option json)
+  |> Option.map ~f:Int.of_string
+
 let push_global_metadata ~metadata trace =
   match trace with
   | None ->
@@ -109,9 +116,13 @@ let push_global_metadata ~metadata trace =
         Option.value ~default:trace.blockchain_length
           (extract_blockchain_length metadata)
       in
+      let global_slot =
+        Option.value ~default:trace.global_slot (extract_global_slot metadata)
+      in
       Some
         { trace with
           blockchain_length
+        ; global_slot
         ; metadata = Yojson.Safe.Util.combine trace.metadata (`Assoc metadata)
         }
 
