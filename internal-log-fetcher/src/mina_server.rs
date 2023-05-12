@@ -1,6 +1,8 @@
 // Copyright (c) Viable Systems
 // SPDX-License-Identifier: Apache-2.0
 
+// TODO: get rid of unwraps and implement proper error handling
+
 use crate::{
     authentication::{Authenticator, BasicAuthenticator, SequentialAuthenticator},
     graphql,
@@ -65,6 +67,10 @@ impl MinaServer {
             last_log_id: 0,
             authorization_info: None,
             output_dir_path: config.output_dir_path,
+            // TODO: this should probably be opened as soon as this instance is created and not when log entries are obtained
+            // The reason is that the trace consumer expects all the files to be there, and will produce noisy warnings when
+            // one is missing. Currently for some reason the graphql endpoint doesn't send some of the prover logs that
+            // are present in the tracing files of non-producer nodes, so that causes the prover trace file to be missing here.
             main_trace_file: None,
             verifier_trace_file: None,
             prover_trace_file: None,
@@ -72,7 +78,6 @@ impl MinaServer {
     }
 
     pub fn authorize(&mut self) {
-        println!("Performing authorization");
         let auth = self.perform_auth_query().unwrap();
         self.authorization_info = Some(AuthorizationInfo {
             server_uuid: auth.server_uuid,
@@ -119,7 +124,6 @@ impl MinaServer {
         let variables = graphql::auth_query::Variables {};
         let response = self
             .post_graphql_blocking::<graphql::AuthQuery, BasicAuthenticator>(&client, variables)?;
-        println!("Auth response: {:?}", response.data);
         let auth = response.data.unwrap().auth;
         Ok(auth)
     }

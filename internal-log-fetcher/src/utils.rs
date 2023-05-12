@@ -1,6 +1,8 @@
 // Copyright (c) Viable Systems
 // SPDX-License-Identifier: Apache-2.0
 
+// TODO: get rid of unwraps and implement proper error handling
+
 use chrono::{DateTime, NaiveDateTime, Utc};
 use std::{
     fs::{File, OpenOptions},

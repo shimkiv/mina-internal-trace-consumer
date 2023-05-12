@@ -39,6 +39,9 @@ fn main() {
 
     // TODO: whenever authorization fails after it initially worked
     // we have to keep retrying because that means that the node got restarted.
-    // Also the old data has to be moved to another directory to start fresh.
+    // Also the old data has to be moved to another directory to start fresh (merging traces
+    // from different node runs is not clean, because the new instance will re-process
+    // the same blocks but through a different path, so it all gets mixed up).
+    // Is it better to handle that here in the program, or have an external script do it?
     mina_server.authorize_and_run_fetch_loop();
 }
