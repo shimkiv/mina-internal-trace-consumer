@@ -1,0 +1,19 @@
+[package]
+name = "internal-log-fetcher"
+version = "0.1.0"
+authors = ["Bruno Deferrari <bruno.deferrari@viablesystems.io>"]
+edition = "2021"
+license = "Apache-2.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+base64 = "0.21.0"
+chrono = "0.4.24"
+ed25519-dalek = "1.0.1"
+graphql_client = { version = "0.12.0", features = ["reqwest-blocking"] }
+rand = "0.7"
+reqwest = { version = "0.11.16", features = ["json"]}
+serde = "1.0.160"
+serde_json = { version = "1.0.96", features = ["raw_value"] }
+structopt = "0.3.26"

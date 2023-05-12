@@ -1,0 +1,6 @@
+query AuthQuery {
+    auth {
+        serverUuid
+        signerSequenceNumber
+    }
+}

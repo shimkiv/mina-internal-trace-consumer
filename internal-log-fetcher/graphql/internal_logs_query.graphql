@@ -1,0 +1,12 @@
+query InternalLogsQuery($logId: Int!) {
+    internalLogs(startLogId: $logId) {
+        id
+        timestamp
+        message
+        metadata {
+            item
+            value
+        }
+        process
+    }
+}

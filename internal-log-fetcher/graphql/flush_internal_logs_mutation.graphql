@@ -1,0 +1,3 @@
+mutation FlushInternalLogsQuery($logId: Int!) {
+    flushInternalLogs(endLogId: $logId)
+}
