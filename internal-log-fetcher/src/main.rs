@@ -7,6 +7,7 @@ use structopt::StructOpt;
 mod authentication;
 mod graphql;
 mod mina_server;
+mod log_entry;
 mod utils;
 
 #[derive(Debug, StructOpt)]
