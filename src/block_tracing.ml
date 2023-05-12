@@ -99,9 +99,9 @@ module Registry = struct
       ?global_slot:wanted_global_slot ?(chain_length = 1) ?(order = `Asc) () =
     let in_requested_range ~blockchain_length ~global_slot =
       match wanted_global_slot with
-      | Some wanted_global_slot ->
-          global_slot <= wanted_global_slot
-          && global_slot > wanted_global_slot - chain_length
+      | Some requested ->
+          global_slot <= requested
+          && global_slot > requested - chain_length
       | None ->
           let requested = Option.value ~default:blockchain_length height in
           blockchain_length <= requested

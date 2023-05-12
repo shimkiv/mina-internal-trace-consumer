@@ -172,6 +172,8 @@ let process_pending_entries ~context_blocks
           false )
 
 module Main_handler = struct
+  let current_call_id = ref 0
+
   let handle_verifier_and_prover_call_checkpoints checkpoint timestamp =
     match checkpoint with
     | "Verify_transaction_snarks"
@@ -200,6 +202,8 @@ module Main_handler = struct
     match control with
     | "current_block" ->
         current_block := Yojson.Safe.Util.to_string data
+    | "current_call_id" ->
+        current_call_id := Yojson.Safe.Util.to_int data
     | "metadata" ->
         Block_tracing.push_metadata ~block_id:!current_block
           (Yojson.Safe.Util.to_assoc data)
