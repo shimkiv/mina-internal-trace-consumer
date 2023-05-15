@@ -8,6 +8,7 @@ ARG BUILD_IMAGE_VERSION=alpine-3.17-ocaml-4.14
 # ARG BUILD_IMAGE=internal-trace-consumer
 # ARG BUILD_IMAGE_VERSION=build
 
+## Trace consumer program (OCaml)
 FROM ${BUILD_IMAGE}:${BUILD_IMAGE_VERSION} AS builder
 
 RUN sudo apk add linux-headers
@@ -20,12 +21,28 @@ WORKDIR /src
 COPY --chown=opam:opam . /src/code
 RUN cd /src/code && opam exec -- dune build src/internal_trace_consumer.exe
 
+## Remote trace fetcher program (Rust)
+FROM rust:1.69.0-alpine${BASE_IMAGE_VERSION} AS rust-builder
+
+WORKDIR /app
+
+RUN apk add --no-cache libgcc libstdc++ openssl openssl-dev musl-dev
+
+COPY ./internal-log-fetcher/Cargo.toml ./internal-log-fetcher/Cargo.lock ./
+COPY ./internal-log-fetcher/src ./src
+COPY ./internal-log-fetcher/graphql ./graphql
+
+RUN cargo build --release
+
+## Final image
 FROM ${BASE_IMAGE}:${BASE_IMAGE_VERSION} AS app
 
-COPY --from=intermediate /src/code/_build/default/src/internal_trace_consumer.exe /internal_trace_consumer.exe
+COPY ./entrypoint.sh /entrypoint.sh
+COPY --from=rust-builder /app/target/release/internal-log-fetcher /internal_log_fetcher
+COPY --from=intermediate /src/code/_build/default/src/internal_trace_consumer.exe /internal_trace_consumer
 
 EXPOSE 9080
 
-ENTRYPOINT [ "/internal_trace_consumer.exe" ]
+ENTRYPOINT [ "/entrypoint.sh" ]
 
-CMD [ "serve", "--trace-file", "/traces/internal-trace.jsonl", "--port", "9080" ]
+CMD [ "consumer", "serve", "--trace-file", "/traces/internal-trace.jsonl", "--port", "9080" ]
