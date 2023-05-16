@@ -6,7 +6,8 @@ module Block_tracing = Block_tracing
 module Make (Handler : sig
   val process_checkpoint : string -> float -> unit
 
-  val process_control : string -> Yojson.Safe.t -> unit
+  val process_control :
+    other:(string * Yojson.Safe.t) list -> string -> Yojson.Safe.t -> unit
 
   val file_changed : unit -> unit
 
@@ -23,8 +24,8 @@ struct
     | `Assoc [ ("rotated_log_end", `Float timestamp) ] ->
         last_rotate_end_timestamp := timestamp ;
         false
-    | `Assoc [ (head, data) ] ->
-        Handler.process_control head data ;
+    | `Assoc ((head, data) :: other) ->
+        Handler.process_control ~other head data ;
         true
     | _ ->
         eprintf "[WARN] unexpected: %s\n%!" original ;

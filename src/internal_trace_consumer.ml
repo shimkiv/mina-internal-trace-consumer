@@ -2,7 +2,6 @@ open Core
 open Async
 module Block_tracing = Block_tracing
 
-(* TODO: when current block is "0", checkpoints and metadata must be discarded *)
 let current_block = ref "0"
 
 (* TODO: cleanup these from time to time *)
@@ -88,6 +87,7 @@ let push_kimchi_checkpoints_from_metadata ~block_id parent_entry
       (Exn.to_string exn) ;
     eprintf "BACKTRACE:\n%s\n%!" (Printexc.get_backtrace ())
 
+(* TODO: for subtraces, only add the ones that have not been attached already *)
 let add_pending_entries_to_block_trace ~block_id ~parent_checkpoint
     pending_entries =
   (* these must be processed at the end *)
@@ -172,7 +172,15 @@ let process_pending_entries ~context_blocks
           false )
 
 module Main_handler = struct
+  module Block_call_tag_key = struct
+    type t = string * string [@@deriving hash, sexp, compare]
+  end
+
   let current_call_id = ref 0
+
+  let current_call_tag = ref ""
+
+  let call_tracker = Hashtbl.create (module Block_call_tag_key)
 
   let handle_verifier_and_prover_call_checkpoints checkpoint timestamp =
     match checkpoint with
@@ -191,19 +199,55 @@ module Main_handler = struct
     | _ ->
         ()
 
-  let process_checkpoint checkpoint timestamp =
-    let _entry =
-      Block_tracing.record ~block_id:!current_block ~checkpoint ~timestamp ()
-    in
-    handle_verifier_and_prover_call_checkpoints checkpoint timestamp ;
-    ()
+  let should_record_checkpoint () =
+    if String.equal !current_block "0" then
+      (* Checkpoints happening outside of any block, or at startup, get dicarded *)
+      (* eprintf "skipping checkpoint because block=0\n%!" ; *)
+      false
+    else if String.equal !current_call_tag "" then true
+    else
+      match Hashtbl.find call_tracker (!current_block, !current_call_tag) with
+      | None ->
+          true
+      | Some call_id when call_id = !current_call_id ->
+          true
+      | Some _call_id ->
+          (* For any given block+call_tag combination we keep only the first call *)
+          (* eprintf
+             "skipping checkpoint because call_id doesn't match (%s) %d <> %d\n\
+              %!"
+             !current_call_tag call_id !current_call_id ; *)
+          false
 
-  let process_control control data =
+  let process_checkpoint checkpoint timestamp =
+    if should_record_checkpoint () then (
+      let _entry =
+        Block_tracing.record ~block_id:!current_block ~checkpoint ~timestamp ()
+      in
+      handle_verifier_and_prover_call_checkpoints checkpoint timestamp ;
+      () )
+
+  let process_control ~other control data =
     match control with
     | "current_block" ->
         current_block := Yojson.Safe.Util.to_string data
-    | "current_call_id" ->
-        current_call_id := Yojson.Safe.Util.to_int data
+    | "current_call_id" -> (
+        current_call_id := Yojson.Safe.Util.to_int data ;
+        match List.Assoc.find ~equal:String.equal other "current_call_tag" with
+        | None | Some (`String "" | `Null) ->
+            (* If it is not present, must reset it *)
+            current_call_tag := ""
+        | Some (`String tag) ->
+            current_call_tag := tag ;
+            let _call_id =
+              Hashtbl.find_or_add call_tracker
+                (!current_block, !current_call_tag) ~default:(fun () ->
+                  !current_call_id )
+            in
+            ()
+        | Some other ->
+            eprintf "Got unexpected value for `current_call_tag`: %s\n%!"
+              (Yojson.Safe.to_string other) )
     | "metadata" ->
         Block_tracing.push_metadata ~block_id:!current_block
           (Yojson.Safe.Util.to_assoc data)
@@ -257,7 +301,7 @@ module Prover_handler = struct
     push_pending_entry Pending.prover_entries !current_call_id
       (Pending.Checkpoint (checkpoint, timestamp))
 
-  let process_control tag data =
+  let process_control ~other:_ tag data =
     if String.equal tag "current_call_id" then
       current_call_id := Yojson.Safe.Util.to_int data
     else
@@ -276,7 +320,7 @@ module Verifier_handler = struct
     push_pending_entry Pending.verifier_entries !current_call_id
       (Pending.Checkpoint (checkpoint, timestamp))
 
-  let process_control tag data =
+  let process_control ~other:_ tag data =
     if String.equal tag "current_call_id" then
       current_call_id := Yojson.Safe.Util.to_int data
     else
