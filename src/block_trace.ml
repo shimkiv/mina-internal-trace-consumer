@@ -25,6 +25,8 @@ type block_source =
 
 type status = [ `Pending | `Failure | `Success ] [@@deriving to_yojson, equal]
 
+type target_trace = [ `Main | `Other ] [@@deriving equal]
+
 let block_source_to_yojson = Util.flatten_yojson_variant block_source_to_yojson
 
 let status_to_yojson = Util.flatten_yojson_variant status_to_yojson
@@ -133,15 +135,29 @@ let readjust_from_previous orig_after orig_before prev_checkpoint =
   in
   (orig_after @ after, before)
 
-let push ~status ~source ~order ?blockchain_length entry trace =
+let get_target_trace trace target =
+  match target with
+  | `Main ->
+      trace.checkpoints
+  | `Other ->
+      trace.other_checkpoints
+
+let update_target_trace trace target new_checkpoints =
+  match target with
+  | `Main ->
+      { trace with checkpoints = new_checkpoints }
+  | `Other ->
+      { trace with other_checkpoints = new_checkpoints }
+
+let push ~status ~source ~order ~target_trace ?blockchain_length entry trace =
   match (trace, order) with
   | None, _ ->
       let trace = empty ?blockchain_length source in
       { trace with checkpoints = [ entry ]; status }
   | Some ({ checkpoints = []; _ } as trace), _ ->
       { trace with checkpoints = [ entry ]; status }
-  | Some ({ checkpoints; _ } as trace), `Chronological_after prev_checkpoint
-    -> (
+  | Some trace, `Chronological_after prev_checkpoint -> (
+      let checkpoints = get_target_trace trace target_trace in
       let after, before =
         List.split_while checkpoints ~f:(fun previous_entry ->
             Float.(previous_entry.started_at >= entry.started_at) )
@@ -156,7 +172,8 @@ let push ~status ~source ~order ?blockchain_length entry trace =
           { previous with duration = entry.started_at -. previous.started_at }
         in
         (* FIXME: set duration for the new added entry *)
-        { trace with checkpoints = after @ (entry :: previous :: before) }
+        let new_checkpoints = after @ (entry :: previous :: before) in
+        update_target_trace trace target_trace new_checkpoints
       with _ ->
         (*printf
           "[ERROR] when trying to add checkpoint %s after %s @ %f for block \
@@ -166,7 +183,8 @@ let push ~status ~source ~order ?blockchain_length entry trace =
           trace.blockchain_length ;*)
         trace )
   | Some ({ checkpoints = previous :: rest; _ } as trace), _
-    when not (equal_status trace.status `Success)
+    when (not (equal_status trace.status `Success))
+         && equal_target_trace target_trace `Main
          (* || not (equal_block_source source `External) *) ->
       (* Only add checkpoints to the main list if processing has not been completed before *)
       let previous =

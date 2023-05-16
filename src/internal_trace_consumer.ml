@@ -79,7 +79,8 @@ let push_kimchi_checkpoints_from_metadata ~block_id parent_entry
           let prev_checkpoint = !current_entry.Block_trace.Entry.checkpoint in
           current_entry :=
             Block_tracing.record ~block_id ~checkpoint ~timestamp
-              ~order:(`Chronological_after prev_checkpoint) ()
+              ~target_trace:`Main ~order:(`Chronological_after prev_checkpoint)
+              ()
       | `Metadata metadata ->
           !current_entry.metadata <- `Assoc metadata )
   with exn ->
@@ -97,6 +98,7 @@ let add_pending_entries_to_block_trace ~block_id ~parent_checkpoint
     | Pending.Checkpoint (checkpoint, timestamp) :: entries ->
         let current_entry =
           Block_tracing.record ~block_id ~checkpoint ~timestamp
+            ~target_trace:`Main
             ~order:(`Chronological_after previous_checkpoint) ()
         in
         loop ~previous_checkpoint:checkpoint entries current_entry
@@ -129,6 +131,7 @@ let add_pending_entries_to_block_trace ~block_id ~parent_checkpoint
       loop ~previous_checkpoint:parent_checkpoint pending_entries
         (Block_trace.Entry.make ~timestamp:0.0 "")
   | `Other ->
+      (* TODO: loop but with target = `Other? *)
       ()
 
 (* Pending, complete verifier/prover traces are matched to a block trace by their timestamp
@@ -199,39 +202,51 @@ module Main_handler = struct
     | _ ->
         ()
 
-  let should_record_checkpoint () =
+  let checkpoint_recording_action () =
     if String.equal !current_block "0" then
       (* Checkpoints happening outside of any block, or at startup, get dicarded *)
       (* eprintf "skipping checkpoint because block=0\n%!" ; *)
-      false
-    else if String.equal !current_call_tag "" then true
+      `Keep
+      (* FIXME: we use `Keep here because storing this at "0" is
+         still useful to find a "nearest trace" for subprocess checkpoints *)
+    else if String.equal !current_call_tag "" then `Keep
     else
       match Hashtbl.find call_tracker (!current_block, !current_call_tag) with
       | None ->
-          true
+          `Keep
       | Some call_id when call_id = !current_call_id ->
-          true
+          `Keep
       | Some _call_id ->
           (* For any given block+call_tag combination we keep only the first call *)
           (* eprintf
              "skipping checkpoint because call_id doesn't match (%s) %d <> %d\n\
               %!"
              !current_call_tag call_id !current_call_id ; *)
-          false
+          `Other
 
   let process_checkpoint checkpoint timestamp =
-    if should_record_checkpoint () then (
-      let _entry =
-        Block_tracing.record ~block_id:!current_block ~checkpoint ~timestamp ()
-      in
-      handle_verifier_and_prover_call_checkpoints checkpoint timestamp ;
-      () )
+    let action = checkpoint_recording_action () in
+    match action with
+    | `Skip ->
+        () (* TODO: this branch is currently unused, see FIXME above *)
+    | (`Keep | `Other) as action ->
+        let target_trace =
+          match action with `Keep -> `Main | `Other -> `Other
+        in
+        let _entry =
+          Block_tracing.record ~block_id:!current_block ~target_trace
+            ~checkpoint ~timestamp ()
+        in
+        handle_verifier_and_prover_call_checkpoints checkpoint timestamp ;
+        ()
 
   let process_control ~other control data =
     match control with
     | "current_block" ->
         current_block := Yojson.Safe.Util.to_string data
     | "current_call_id" -> (
+        (* TODO: to avoid constant rehashing a flag can be set here about where
+           to target the next checkpoints *)
         current_call_id := Yojson.Safe.Util.to_int data ;
         match List.Assoc.find ~equal:String.equal other "current_call_tag" with
         | None | Some (`String "" | `Null) ->
