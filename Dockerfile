@@ -32,10 +32,14 @@ COPY ./internal-log-fetcher/Cargo.toml ./internal-log-fetcher/Cargo.lock ./
 COPY ./internal-log-fetcher/src ./src
 COPY ./internal-log-fetcher/graphql ./graphql
 
-RUN cargo build --release
+# These RUSTFLAGS are required to properly build an alpine binary
+# linked to OpenSSL that doesn't segfault
+RUN env RUSTFLAGS="-C target-feature=-crt-static" cargo build --release
 
 ## Final image
 FROM ${BASE_IMAGE}:${BASE_IMAGE_VERSION} AS app
+
+RUN apk add --no-cache libgcc libstdc++ openssl
 
 COPY ./entrypoint.sh /entrypoint.sh
 COPY --from=rust-builder /app/target/release/internal-log-fetcher /internal_log_fetcher
