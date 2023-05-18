@@ -192,12 +192,9 @@ module Registry = struct
         let produced_traces = List.take produced_traces max_length in
         { traces; produced_traces }
 
-  let push_entry ~status ~source ~order ~target_trace ?blockchain_length
-      block_id entry =
+  let push_entry ~status ~source ~order ~target_trace block_id entry =
     Hashtbl.update registry block_id
-      ~f:
-        (Trace.push ~status ~source ~order ~target_trace ?blockchain_length
-           entry )
+      ~f:(Trace.push ~status ~source ~order ~target_trace entry)
 
   let push_metadata ~metadata block_id =
     Hashtbl.change registry block_id ~f:(Trace.push_metadata ~metadata)
@@ -263,32 +260,18 @@ let handle_status_change status block_id =
   | _ ->
       ()
 
-let checkpoint ?status ?metadata ?blockchain_length ~block_id ~target_trace
-    ?source ?(order = `Append) ~checkpoint ~timestamp () =
-  let source =
-    match source with
-    | None ->
-        compute_source checkpoint
-    | Some source ->
-        source
-  in
-  let status =
-    match status with
-    | Some status ->
-        status
-    | None ->
-        compute_status checkpoint
-  in
+let checkpoint ?metadata ~block_id ~target_trace ?(order = `Append) ~checkpoint
+    ~timestamp () =
+  let source = compute_source checkpoint in
+  let status = compute_status checkpoint in
+  (* NOTE: here, if successful or failed, the structured trace can be built and stored in the db *)
   handle_status_change status block_id ;
   let entry = Trace.Entry.make ?metadata ~timestamp checkpoint in
-  Registry.push_entry ~status ~source ~order ~target_trace ?blockchain_length
-    block_id entry ;
+  Registry.push_entry ~status ~source ~order ~target_trace block_id entry ;
   entry
 
 let failure ~reason =
-  checkpoint
-    ~metadata:[ ("reason", `String reason) ]
-    ~status:`Failure ~checkpoint:"Failure"
+  checkpoint ~metadata:[ ("reason", `String reason) ] ~checkpoint:"Failure"
 
 let push_metadata ~block_id metadata = Registry.push_metadata ~metadata block_id
 

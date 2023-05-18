@@ -88,7 +88,6 @@ let push_kimchi_checkpoints_from_metadata ~block_id parent_entry
       (Exn.to_string exn) ;
     eprintf "BACKTRACE:\n%s\n%!" (Printexc.get_backtrace ())
 
-(* TODO: for subtraces, only add the ones that have not been attached already *)
 let add_pending_entries_to_block_trace ~block_id ~parent_checkpoint
     pending_entries =
   (* these must be processed at the end *)

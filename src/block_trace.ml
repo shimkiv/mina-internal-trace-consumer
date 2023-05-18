@@ -43,9 +43,9 @@ type t =
   }
 [@@deriving to_yojson]
 
-let empty ?(blockchain_length = 0) source =
+let empty source =
   { source
-  ; blockchain_length
+  ; blockchain_length = 0
   ; global_slot = 0
   ; checkpoints = []
   ; other_checkpoints = []
@@ -149,10 +149,10 @@ let update_target_trace trace target new_checkpoints =
   | `Other ->
       { trace with other_checkpoints = new_checkpoints }
 
-let push ~status ~source ~order ~target_trace ?blockchain_length entry trace =
+let push ~status ~source ~order ~target_trace entry trace =
   match (trace, order) with
   | None, _ ->
-      let trace = empty ?blockchain_length source in
+      let trace = empty source in
       { trace with checkpoints = [ entry ]; status }
   | Some ({ checkpoints = []; _ } as trace), _ ->
       { trace with checkpoints = [ entry ]; status }
