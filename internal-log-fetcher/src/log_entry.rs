@@ -1,6 +1,5 @@
 use crate::{
-    graphql::internal_logs_query::InternalLogsQueryInternalLogs,
-    utils::convert_timestamp_to_float,
+    graphql::internal_logs_query::InternalLogsQueryInternalLogs, utils::convert_timestamp_to_float,
 };
 use serde::ser::{Serialize, SerializeSeq, Serializer};
 use serde_json::Map;

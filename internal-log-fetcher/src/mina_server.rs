@@ -7,7 +7,7 @@ use crate::{
     authentication::{Authenticator, BasicAuthenticator, SequentialAuthenticator},
     graphql,
     log_entry::LogEntry,
-    utils,
+    utils, Target,
 };
 use base64::{engine::general_purpose, Engine};
 use graphql_client::GraphQLQuery;
@@ -20,8 +20,7 @@ pub struct AuthorizationInfo {
 }
 
 pub(crate) struct MinaServerConfig {
-    pub(crate) address: String,
-    pub(crate) graphql_port: u16,
+    pub(crate) target: Target,
     pub(crate) use_https: bool,
     pub(crate) secret_key_base64: String,
     pub(crate) output_dir_path: PathBuf,
@@ -53,10 +52,13 @@ impl MinaServer {
         };
         let pk_base64 = general_purpose::STANDARD.encode(keypair.public.as_bytes());
         let schema = if config.use_https { "https" } else { "http" };
-        let graphql_uri = format!(
-            "{}://{}:{}/graphql",
-            schema, config.address, config.graphql_port
-        );
+        let graphql_uri = match config.target {
+            Target::NodeAddressPort {
+                address,
+                graphql_port,
+            } => format!("{}://{}:{}/graphql", schema, address, graphql_port),
+            Target::FullUrl { url } => url,
+        };
 
         std::fs::create_dir_all(&config.output_dir_path).expect("Could not create output dir");
 
