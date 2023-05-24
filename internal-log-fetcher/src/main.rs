@@ -1,6 +1,7 @@
 // Copyright (c) Viable Systems
 // SPDX-License-Identifier: Apache-2.0
 
+use anyhow::{Context, Result};
 use std::path::PathBuf;
 use structopt::StructOpt;
 use trace_consumer::TraceConsumer;
@@ -42,8 +43,13 @@ enum Target {
     },
 }
 
+fn read_secret_key_base64(secret_key_path: &PathBuf) -> Result<String> {
+    std::fs::read_to_string(secret_key_path)
+        .with_context(|| format!("Failed to read secret key from {:?}", secret_key_path))
+}
+
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     // TODO for discovery
     // - Remove cli args, not needed anymore (or instead add a subcommand to support fetching from specific node or discovery)
     // - from the discovery, obtain the list of node addresses
@@ -52,7 +58,7 @@ async fn main() {
     //   output directory for the specific node
     // - Launch a consumer program instance with that directory as input
     if false {
-        let mut discovery = discovery::DiscoveryService::new();
+        let mut discovery = discovery::DiscoveryService::try_new()?;
 
         let participants = discovery
             .discover_participants(discovery::DiscoveryParams {
@@ -60,14 +66,13 @@ async fn main() {
                 limit: 10_000,
                 only_block_producers: false,
             })
-            .await
-            .unwrap();
+            .await?;
 
         println!("participants: {:?}", participants);
     }
     let opts = Opts::from_args();
     let main_trace_file_path = opts.output_dir_path.join("internal-trace.jsonl");
-    let secret_key_base64 = std::fs::read_to_string(opts.secret_key_path).unwrap();
+    let secret_key_base64 = read_secret_key_base64(&opts.secret_key_path)?;
     let config = mina_server::MinaServerConfig {
         secret_key_base64,
         target: opts.target,
@@ -93,5 +98,7 @@ async fn main() {
     // from different node runs is not clean, because the new instance will re-process
     // the same blocks but through a different path, so it all gets mixed up).
     // Is it better to handle that here in the program, or have an external script do it?
-    mina_server.authorize_and_run_fetch_loop().await;
+    mina_server.authorize_and_run_fetch_loop().await?;
+
+    Ok(())
 }

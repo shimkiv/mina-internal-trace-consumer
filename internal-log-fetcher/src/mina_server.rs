@@ -1,7 +1,7 @@
 // Copyright (c) Viable Systems
 // SPDX-License-Identifier: Apache-2.0
 
-// TODO: get rid of unwraps and implement proper error handling
+// TODO: improve error handling
 
 use crate::{
     authentication::{Authenticator, BasicAuthenticator, SequentialAuthenticator},
@@ -9,9 +9,10 @@ use crate::{
     log_entry::LogEntry,
     utils, Target,
 };
+use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose, Engine};
 use graphql_client::GraphQLQuery;
-use std::{error::Error, fs::File, io::Write, path::PathBuf};
+use std::{fs::File, io::Write, path::PathBuf};
 
 #[derive(Default, Clone)]
 pub struct AuthorizationInfo {
@@ -100,21 +101,23 @@ impl MinaServer {
         prev_last_log_id < self.last_log_id
     }
 
-    pub async fn flush_logs(&mut self) {
-        self.perform_flush_internal_logs_query().await.unwrap();
+    pub async fn flush_logs(&mut self) -> Result<()> {
+        self.perform_flush_internal_logs_query().await?;
         if let Some(auth_info) = &mut self.authorization_info {
             auth_info.signer_sequence_number += 1;
         }
+
+        Ok(())
     }
 
     pub(crate) async fn post_graphql<Q: GraphQLQuery, A: Authenticator>(
         &self,
         client: &reqwest::Client,
         variables: Q::Variables,
-    ) -> Result<graphql_client::Response<Q::ResponseData>, reqwest::Error> {
+    ) -> Result<graphql_client::Response<Q::ResponseData>> {
         let body = Q::build_query(variables);
-        let body_bytes = serde_json::to_vec(&body).unwrap();
-        let signature_header = A::signature_header(self, &body_bytes);
+        let body_bytes = serde_json::to_vec(&body)?;
+        let signature_header = A::signature_header(self, &body_bytes)?;
         let response = client
             .post(&self.graphql_uri)
             .json(&body)
@@ -122,22 +125,23 @@ impl MinaServer {
             .send()
             .await?;
 
-        response.json().await
+        Ok(response.json().await?)
     }
 
-    pub async fn perform_auth_query(
-        &self,
-    ) -> Result<graphql::auth_query::AuthQueryAuth, Box<dyn Error>> {
+    pub async fn perform_auth_query(&self) -> Result<graphql::auth_query::AuthQueryAuth> {
         let client = reqwest::Client::new();
         let variables = graphql::auth_query::Variables {};
         let response = self
             .post_graphql::<graphql::AuthQuery, BasicAuthenticator>(&client, variables)
             .await?;
-        let auth = response.data.unwrap().auth;
+        let auth = response
+            .data
+            .ok_or_else(|| anyhow!("Response data is missing"))?
+            .auth;
         Ok(auth)
     }
 
-    pub async fn perform_fetch_internal_logs_query(&mut self) -> Result<i64, Box<dyn Error>> {
+    pub async fn perform_fetch_internal_logs_query(&mut self) -> Result<i64> {
         let client = reqwest::Client::new();
         let variables = graphql::internal_logs_query::Variables {
             log_id: self.last_log_id,
@@ -145,7 +149,9 @@ impl MinaServer {
         let response = self
             .post_graphql::<graphql::InternalLogsQuery, SequentialAuthenticator>(&client, variables)
             .await?;
-        let response_data = response.data.unwrap();
+        let response_data = response
+            .data
+            .ok_or_else(|| anyhow!("Response data is missing"))?;
 
         let mut last_log_id = self.last_log_id;
 
@@ -153,7 +159,7 @@ impl MinaServer {
             last_log_id = last.id;
         }
 
-        self.save_log_entries(response_data.internal_logs);
+        self.save_log_entries(response_data.internal_logs)?;
 
         Ok(last_log_id)
     }
@@ -161,9 +167,9 @@ impl MinaServer {
     pub(crate) fn save_log_entries(
         &mut self,
         internal_logs: Vec<graphql::internal_logs_query::InternalLogsQueryInternalLogs>,
-    ) {
+    ) -> Result<()> {
         for item in internal_logs {
-            if let Some(log_file_handle) = self.file_for_process(&item.process) {
+            if let Some(log_file_handle) = self.file_for_process(&item.process)? {
                 let log = LogEntry::try_from(item).unwrap();
                 let log_json =
                     serde_json::to_string(&log).expect("Failed to serialize LogEntry as JSON");
@@ -172,9 +178,11 @@ impl MinaServer {
                 log_file_handle.write_all(b"\n").unwrap();
             }
         }
+
+        Ok(())
     }
 
-    pub async fn perform_flush_internal_logs_query(&self) -> Result<(), Box<dyn Error>> {
+    pub async fn perform_flush_internal_logs_query(&self) -> Result<()> {
         // TODO: make configurable, default to false
         if false {
             let client = reqwest::Client::new();
@@ -192,14 +200,15 @@ impl MinaServer {
         Ok(())
     }
 
-    pub async fn authorize_and_run_fetch_loop(&mut self) {
+    pub async fn authorize_and_run_fetch_loop(&mut self) -> Result<()> {
         self.authorize().await;
+
         loop {
             if self.fetch_more_logs().await {
                 // TODO: make this configurable? we don't want to do it by default
                 // because we may have many replicas of the discovery+fetcher service running
                 if false {
-                    self.flush_logs().await;
+                    self.flush_logs().await?;
                 }
             }
             // TODO: handle the case where fetch_more_logs fails because of an authentication
@@ -209,26 +218,29 @@ impl MinaServer {
         }
     }
 
-    pub(crate) fn file_for_process(&mut self, process: &Option<String>) -> Option<&mut File> {
+    pub(crate) fn file_for_process(
+        &mut self,
+        process: &Option<String>,
+    ) -> Result<Option<&mut File>> {
         let file = match process.as_deref() {
             None => utils::maybe_open(
                 &mut self.main_trace_file,
                 self.output_dir_path.join("internal-trace.jsonl"),
-            ),
+            )?,
             Some("prover") => utils::maybe_open(
                 &mut self.prover_trace_file,
                 self.output_dir_path.join("prover-internal-trace.jsonl"),
-            ),
+            )?,
             Some("verifier") => utils::maybe_open(
                 &mut self.verifier_trace_file,
                 self.output_dir_path.join("verifier-internal-trace.jsonl"),
-            ),
+            )?,
             Some(process) => {
                 eprintln!("[WARN] got unexpected process {process}");
-                return None;
+                return Ok(None);
             }
         };
 
-        Some(file)
+        Ok(Some(file))
     }
 }

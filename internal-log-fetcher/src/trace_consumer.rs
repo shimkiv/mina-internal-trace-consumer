@@ -13,7 +13,11 @@ pub struct TraceConsumer {
 }
 
 impl TraceConsumer {
-    pub fn new(consumer_executable_path: PathBuf, main_trace_file_path: PathBuf, graphql_port: u16) -> Self {
+    pub fn new(
+        consumer_executable_path: PathBuf,
+        main_trace_file_path: PathBuf,
+        graphql_port: u16,
+    ) -> Self {
         Self {
             consumer_executable_path,
             main_trace_file_path,

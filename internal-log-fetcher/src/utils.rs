@@ -1,26 +1,27 @@
 // Copyright (c) Viable Systems
 // SPDX-License-Identifier: Apache-2.0
 
-// TODO: get rid of unwraps and implement proper error handling
-
+use anyhow::Result;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use std::{
     fs::{File, OpenOptions},
     path::Path,
 };
 
-pub fn maybe_open<P>(file_opt: &mut Option<File>, path: P) -> &mut File
+pub fn maybe_open<P>(file_opt: &mut Option<File>, path: P) -> Result<&mut File>
 where
     P: AsRef<Path>,
 {
-    file_opt.get_or_insert_with(|| {
-        OpenOptions::new()
+    if let Some(file) = file_opt {
+        Ok(file)
+    } else {
+        let file = OpenOptions::new()
             .create(true)
             .write(true)
             .append(true)
-            .open(path)
-            .unwrap()
-    })
+            .open(path)?;
+        Ok(file_opt.insert(file))
+    }
 }
 
 pub fn convert_timestamp_to_float(timestamp: &str) -> Result<f64, chrono::ParseError> {

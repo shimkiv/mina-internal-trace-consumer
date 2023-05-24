@@ -1,6 +1,7 @@
 // Copyright (c) Viable Systems
 // SPDX-License-Identifier: Apache-2.0
 
+use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
 use object_store::gcp::{GoogleCloudStorage, GoogleCloudStorageBuilder};
@@ -43,18 +44,18 @@ fn offset_by_time(t: DateTime<Utc>) -> String {
 }
 
 impl DiscoveryService {
-    pub fn new() -> Self {
-        let gcs = GoogleCloudStorageBuilder::from_env().build().unwrap();
+    pub fn try_new() -> Result<Self> {
+        let gcs = GoogleCloudStorageBuilder::from_env().build()?;
         let node_data = HashMap::new();
-        Self { gcs, node_data }
+        Ok(Self { gcs, node_data })
     }
 
     pub async fn discover_participants(
         &mut self,
         params: DiscoveryParams,
-    ) -> Result<Vec<NodeAddress>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<NodeAddress>> {
         let before = Utc::now() - chrono::Duration::minutes(params.offset_min as i64);
-        let offset: Path = offset_by_time(before).try_into().unwrap();
+        let offset: Path = offset_by_time(before).try_into()?;
         let prefix: Path = "submissions".into();
         let it = self.gcs.list_with_offset(Some(&prefix), &offset).await?;
         let mut results = HashSet::new();
@@ -65,19 +66,13 @@ impl DiscoveryService {
             .await;
 
         for object_meta in list_results {
-            let bytes = self
-                .gcs
-                .get(&object_meta.location)
-                .await
-                .unwrap()
-                .bytes()
-                .await
-                .unwrap();
-            let meta: MetaToBeSaved = serde_json::from_slice(&bytes).unwrap();
+            let bytes = self.gcs.get(&object_meta.location).await?.bytes().await?;
+            let meta: MetaToBeSaved = serde_json::from_slice(&bytes)?;
             let colon_ix = meta.remote_addr.find(':').ok_or_else(|| {
-                format!(
+                anyhow!(
                     "wrong remote address in submission {}: {}",
-                    object_meta.location, meta.remote_addr
+                    object_meta.location,
+                    meta.remote_addr
                 )
             })?;
             let addr = format!(

@@ -1,14 +1,13 @@
 // Copyright (c) Viable Systems
 // SPDX-License-Identifier: Apache-2.0
 
-// TODO: get rid of unwraps and implement proper error handling
-
 use crate::mina_server::MinaServer;
+use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose, Engine};
 use ed25519_dalek::Signer;
 
 pub(crate) trait Authenticator {
-    fn signature_header(server: &MinaServer, body_bytes: &[u8]) -> String;
+    fn signature_header(server: &MinaServer, body_bytes: &[u8]) -> Result<String>;
 }
 
 pub(crate) struct BasicAuthenticator {}
@@ -22,17 +21,20 @@ pub(crate) fn sign_data(keypair: &ed25519_dalek::Keypair, data: &[u8]) -> Vec<u8
 }
 
 impl Authenticator for BasicAuthenticator {
-    fn signature_header(server: &MinaServer, body_bytes: &[u8]) -> String {
+    fn signature_header(server: &MinaServer, body_bytes: &[u8]) -> Result<String> {
         let signature_bytes = sign_data(&server.keypair, body_bytes);
         let signature_base64 = general_purpose::STANDARD.encode(signature_bytes);
         let pk_base64 = &server.pk_base64;
-        format!("Signature {pk_base64} {signature_base64}")
+        Ok(format!("Signature {pk_base64} {signature_base64}"))
     }
 }
 
 impl Authenticator for SequentialAuthenticator {
-    fn signature_header(server: &MinaServer, body_bytes: &[u8]) -> String {
-        let authorization_info = server.authorization_info.as_ref().unwrap();
+    fn signature_header(server: &MinaServer, body_bytes: &[u8]) -> Result<String> {
+        let authorization_info = server
+            .authorization_info
+            .as_ref()
+            .ok_or_else(|| anyhow!("Authorization info is missing"))?;
         let server_uuid = &authorization_info.server_uuid;
         let signer_sequence_number = authorization_info.signer_sequence_number;
         let mut data: Vec<u8> = Vec::with_capacity(
@@ -47,7 +49,7 @@ impl Authenticator for SequentialAuthenticator {
         let signature_base64 = general_purpose::STANDARD.encode(signature_bytes);
         let pk_base64 = &server.pk_base64;
 
-        format!("Signature {pk_base64} {signature_base64} ; Sequencing {server_uuid} {signer_sequence_number}")
+        Ok(format!("Signature {pk_base64} {signature_base64} ; Sequencing {server_uuid} {signer_sequence_number}"))
     }
 }
 
@@ -105,7 +107,7 @@ mod tests {
     fn test_basic_authenticator() {
         let server = create_test_server();
         let body_bytes = b"example body";
-        let signature_header = BasicAuthenticator::signature_header(&server, body_bytes);
+        let signature_header = BasicAuthenticator::signature_header(&server, body_bytes).unwrap();
 
         // This signature has been precomputed for the given data and server instance.
         let expected_signature_header = "Signature BaG9HYTNxkqyX7haFnz/HXL9FhYwS4gdQ7uYWiStgoY= 7a6Wx4HQ5h0JJKjJWh3zXxLAa7qql+UXAuyqbQh+XW5C/IcmRchtp/SjBPvhOQmtlYNJGjvCrbBWO0SqlrVcDQ==";
@@ -116,7 +118,8 @@ mod tests {
     fn test_sequential_authenticator() {
         let server = create_test_server();
         let body_bytes = b"example body";
-        let signature_header = SequentialAuthenticator::signature_header(&server, body_bytes);
+        let signature_header =
+            SequentialAuthenticator::signature_header(&server, body_bytes).unwrap();
 
         // This signature has been precomputed for the given data and server instance.
         let expected_signature_header = "Signature BaG9HYTNxkqyX7haFnz/HXL9FhYwS4gdQ7uYWiStgoY= LSy0n5XkS2wuTWuVQbFFs+H7gmR+BIE/bqlwFGVcFv0awYMXl48vuAfvYEqqnpAVSNXt8YH6n0YNew4i0pYUBg== ; Sequencing 24511be6-320d-4ef2-8dff-89916bcb6751 1";
