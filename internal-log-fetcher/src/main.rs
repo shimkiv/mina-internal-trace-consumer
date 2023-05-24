@@ -76,10 +76,15 @@ async fn main() {
     };
     let mut mina_server = mina_server::MinaServer::new(config);
 
-    let mut consumer = TraceConsumer::new(main_trace_file_path, 3999);
+    // TODO: make consumer exe path configurable
+    let mut consumer = TraceConsumer::new(
+        "../_build/default/src/internal_trace_consumer.exe".into(),
+        main_trace_file_path,
+        3999,
+    );
 
     tokio::spawn(async move {
-        consumer.run().await;
+        let _ = consumer.run().await;
     });
 
     // TODO: whenever authorization fails after it initially worked
