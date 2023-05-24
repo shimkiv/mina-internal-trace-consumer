@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use structopt::StructOpt;
 
 mod authentication;
+mod discovery;
 mod graphql;
 mod log_entry;
 mod mina_server;
@@ -39,7 +40,31 @@ enum Target {
     },
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
+    // TODO for discovery
+    // - Remove cli args, not needed anymore (or instead add a subcommand to support fetching from specific node or discovery)
+    // - from the discovery, obtain the list of node addresses
+    // - For each result that was not seen before, create a `MinaServerConfig` and `MinaServer` with that config
+    // - Launch a new tokio task that runs the mina server handle `authorize_and_run_fetch_loop` with an unique
+    //   output directory for the specific node
+    // - Launch a consumer program instance with that directory as input
+    if false {
+        let mut discovery = discovery::DiscoveryService::new();
+
+        let participants = discovery::discover_participants(
+            &mut discovery,
+            discovery::DiscoveryParams {
+                offset_min: 15,
+                limit: 10_000,
+                only_block_producers: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        println!("participants: {:?}", participants);
+    }
     let opts = Opts::from_args();
     let secret_key_base64 = std::fs::read_to_string(opts.secret_key_path).unwrap();
     let config = mina_server::MinaServerConfig {

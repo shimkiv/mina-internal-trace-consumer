@@ -80,7 +80,7 @@ impl MinaServer {
     }
 
     pub fn authorize(&mut self) {
-        let auth = self.perform_auth_query().unwrap();
+        let auth = self.perform_auth_query().expect("Authorization failed");
         self.authorization_info = Some(AuthorizationInfo {
             server_uuid: auth.server_uuid,
             signer_sequence_number: auth.signer_sequence_number.parse().unwrap(),
@@ -119,6 +119,25 @@ impl MinaServer {
             .send()?;
 
         response.json()
+    }
+
+    // TODO: use this instead of post_graphql_blocking
+    pub(crate) async fn post_graphql<Q: GraphQLQuery, A: Authenticator>(
+        &self,
+        client: &reqwest::Client,
+        variables: Q::Variables,
+    ) -> Result<graphql_client::Response<Q::ResponseData>, reqwest::Error> {
+        let body = Q::build_query(variables);
+        let body_bytes = serde_json::to_vec(&body).unwrap();
+        let signature_header = A::signature_header(self, &body_bytes);
+        let response = client
+            .post(&self.graphql_uri)
+            .json(&body)
+            .header(reqwest::header::AUTHORIZATION, signature_header)
+            .send()
+            .await?;
+
+        response.json().await
     }
 
     pub fn perform_auth_query(&self) -> Result<graphql::auth_query::AuthQueryAuth, Box<dyn Error>> {
@@ -169,16 +188,19 @@ impl MinaServer {
     }
 
     pub fn perform_flush_internal_logs_query(&self) -> Result<(), Box<dyn Error>> {
-        let client = reqwest::blocking::Client::new();
-        let variables = graphql::flush_internal_logs_query::Variables {
-            log_id: self.last_log_id,
-        };
-        let response = self
-            .post_graphql_blocking::<graphql::FlushInternalLogsQuery, SequentialAuthenticator>(
-                &client, variables,
-            )?;
-        // TODO: anything to do with the response?
-        let _response_data = response.data.unwrap();
+        // TODO: make configurable, default to false
+        if false {
+            let client = reqwest::blocking::Client::new();
+            let variables = graphql::flush_internal_logs_query::Variables {
+                log_id: self.last_log_id,
+            };
+            let response = self
+                .post_graphql_blocking::<graphql::FlushInternalLogsQuery, SequentialAuthenticator>(
+                    &client, variables,
+                )?;
+            // TODO: anything to do with the response?
+            let _response_data = response.data.unwrap();
+        }
         Ok(())
     }
 
