@@ -81,5 +81,5 @@ async fn main() {
     // from different node runs is not clean, because the new instance will re-process
     // the same blocks but through a different path, so it all gets mixed up).
     // Is it better to handle that here in the program, or have an external script do it?
-    mina_server.authorize_and_run_fetch_loop();
+    mina_server.authorize_and_run_fetch_loop().await;
 }

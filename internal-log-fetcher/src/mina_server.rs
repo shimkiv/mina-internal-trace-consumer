@@ -79,17 +79,20 @@ impl MinaServer {
         }
     }
 
-    pub fn authorize(&mut self) {
-        let auth = self.perform_auth_query().expect("Authorization failed");
+    pub async fn authorize(&mut self) {
+        let auth = self
+            .perform_auth_query()
+            .await
+            .expect("Authorization failed");
         self.authorization_info = Some(AuthorizationInfo {
             server_uuid: auth.server_uuid,
             signer_sequence_number: auth.signer_sequence_number.parse().unwrap(),
         });
     }
 
-    pub fn fetch_more_logs(&mut self) -> bool {
+    pub async fn fetch_more_logs(&mut self) -> bool {
         let prev_last_log_id = self.last_log_id;
-        self.last_log_id = self.perform_fetch_internal_logs_query().unwrap();
+        self.last_log_id = self.perform_fetch_internal_logs_query().await.unwrap();
         if let Some(auth_info) = &mut self.authorization_info {
             auth_info.signer_sequence_number += 1;
         }
@@ -97,31 +100,13 @@ impl MinaServer {
         prev_last_log_id < self.last_log_id
     }
 
-    pub fn flush_logs(&mut self) {
-        self.perform_flush_internal_logs_query().unwrap();
+    pub async fn flush_logs(&mut self) {
+        self.perform_flush_internal_logs_query().await.unwrap();
         if let Some(auth_info) = &mut self.authorization_info {
             auth_info.signer_sequence_number += 1;
         }
     }
 
-    pub(crate) fn post_graphql_blocking<Q: GraphQLQuery, A: Authenticator>(
-        &self,
-        client: &reqwest::blocking::Client,
-        variables: Q::Variables,
-    ) -> Result<graphql_client::Response<Q::ResponseData>, reqwest::Error> {
-        let body = Q::build_query(variables);
-        let body_bytes = serde_json::to_vec(&body).unwrap();
-        let signature_header = A::signature_header(self, &body_bytes);
-        let response = client
-            .post(&self.graphql_uri)
-            .json(&body)
-            .header(reqwest::header::AUTHORIZATION, signature_header)
-            .send()?;
-
-        response.json()
-    }
-
-    // TODO: use this instead of post_graphql_blocking
     pub(crate) async fn post_graphql<Q: GraphQLQuery, A: Authenticator>(
         &self,
         client: &reqwest::Client,
@@ -140,24 +125,26 @@ impl MinaServer {
         response.json().await
     }
 
-    pub fn perform_auth_query(&self) -> Result<graphql::auth_query::AuthQueryAuth, Box<dyn Error>> {
-        let client = reqwest::blocking::Client::new();
+    pub async fn perform_auth_query(
+        &self,
+    ) -> Result<graphql::auth_query::AuthQueryAuth, Box<dyn Error>> {
+        let client = reqwest::Client::new();
         let variables = graphql::auth_query::Variables {};
         let response = self
-            .post_graphql_blocking::<graphql::AuthQuery, BasicAuthenticator>(&client, variables)?;
+            .post_graphql::<graphql::AuthQuery, BasicAuthenticator>(&client, variables)
+            .await?;
         let auth = response.data.unwrap().auth;
         Ok(auth)
     }
 
-    pub fn perform_fetch_internal_logs_query(&mut self) -> Result<i64, Box<dyn Error>> {
-        let client = reqwest::blocking::Client::new();
+    pub async fn perform_fetch_internal_logs_query(&mut self) -> Result<i64, Box<dyn Error>> {
+        let client = reqwest::Client::new();
         let variables = graphql::internal_logs_query::Variables {
             log_id: self.last_log_id,
         };
         let response = self
-            .post_graphql_blocking::<graphql::InternalLogsQuery, SequentialAuthenticator>(
-                &client, variables,
-            )?;
+            .post_graphql::<graphql::InternalLogsQuery, SequentialAuthenticator>(&client, variables)
+            .await?;
         let response_data = response.data.unwrap();
 
         let mut last_log_id = self.last_log_id;
@@ -187,28 +174,33 @@ impl MinaServer {
         }
     }
 
-    pub fn perform_flush_internal_logs_query(&self) -> Result<(), Box<dyn Error>> {
+    pub async fn perform_flush_internal_logs_query(&self) -> Result<(), Box<dyn Error>> {
         // TODO: make configurable, default to false
         if false {
-            let client = reqwest::blocking::Client::new();
+            let client = reqwest::Client::new();
             let variables = graphql::flush_internal_logs_query::Variables {
                 log_id: self.last_log_id,
             };
             let response = self
-                .post_graphql_blocking::<graphql::FlushInternalLogsQuery, SequentialAuthenticator>(
+                .post_graphql::<graphql::FlushInternalLogsQuery, SequentialAuthenticator>(
                     &client, variables,
-                )?;
+                )
+                .await?;
             // TODO: anything to do with the response?
             let _response_data = response.data.unwrap();
         }
         Ok(())
     }
 
-    pub fn authorize_and_run_fetch_loop(&mut self) {
-        self.authorize();
+    pub async fn authorize_and_run_fetch_loop(&mut self) {
+        self.authorize().await;
         loop {
-            if self.fetch_more_logs() {
-                self.flush_logs();
+            if self.fetch_more_logs().await {
+                // TODO: make this configurable? we don't want to do it by default
+                // because we may have many replicas of the discovery+fetcher service running
+                if false {
+                    self.flush_logs().await;
+                }
             }
             // TODO: handle the case where fetch_more_logs fails because of an authentication
             // that was previously successful, this means that the server crashed
