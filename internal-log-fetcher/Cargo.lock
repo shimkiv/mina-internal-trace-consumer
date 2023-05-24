@@ -501,7 +501,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aa61bb9dc6d373a8b465a5da17b62809483e8527a34b0e9034dc0915b09e160a"
 dependencies = [
  "graphql_query_derive",
- "reqwest",
  "serde",
  "serde_json",
 ]
