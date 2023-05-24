@@ -52,16 +52,14 @@ async fn main() {
     if false {
         let mut discovery = discovery::DiscoveryService::new();
 
-        let participants = discovery::discover_participants(
-            &mut discovery,
-            discovery::DiscoveryParams {
+        let participants = discovery
+            .discover_participants(discovery::DiscoveryParams {
                 offset_min: 15,
                 limit: 10_000,
                 only_block_producers: false,
-            },
-        )
-        .await
-        .unwrap();
+            })
+            .await
+            .unwrap();
 
         println!("participants: {:?}", participants);
     }

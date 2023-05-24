@@ -48,54 +48,51 @@ impl DiscoveryService {
         let node_data = HashMap::new();
         Self { gcs, node_data }
     }
-}
 
-pub async fn discover_participants(
-    discovery: &mut DiscoveryService,
-    params: DiscoveryParams,
-) -> Result<Vec<NodeAddress>, Box<dyn std::error::Error>> {
-    let before = Utc::now() - chrono::Duration::minutes(params.offset_min as i64);
-    let offset: Path = offset_by_time(before).try_into().unwrap();
-    let prefix: Path = "submissions".into();
-    let it = discovery
-        .gcs
-        .list_with_offset(Some(&prefix), &offset)
-        .await?;
-    let mut results = HashSet::new();
-    // TODO: do something with errors (probably add logger and report them)
-    let list_results: Vec<_> = it
-        .filter_map(|result| async { result.ok() })
-        .collect()
-        .await;
+    pub async fn discover_participants(
+        &mut self,
+        params: DiscoveryParams,
+    ) -> Result<Vec<NodeAddress>, Box<dyn std::error::Error>> {
+        let before = Utc::now() - chrono::Duration::minutes(params.offset_min as i64);
+        let offset: Path = offset_by_time(before).try_into().unwrap();
+        let prefix: Path = "submissions".into();
+        let it = self.gcs.list_with_offset(Some(&prefix), &offset).await?;
+        let mut results = HashSet::new();
+        // TODO: do something with errors (probably add logger and report them)
+        let list_results: Vec<_> = it
+            .filter_map(|result| async { result.ok() })
+            .collect()
+            .await;
 
-    for object_meta in list_results {
-        let bytes = discovery
-            .gcs
-            .get(&object_meta.location)
-            .await
-            .unwrap()
-            .bytes()
-            .await
-            .unwrap();
-        let meta: MetaToBeSaved = serde_json::from_slice(&bytes).unwrap();
-        let colon_ix = meta.remote_addr.find(':').ok_or_else(|| {
-            format!(
-                "wrong remote address in submission {}: {}",
-                object_meta.location, meta.remote_addr
-            )
-        })?;
-        let addr = format!(
-            "{}:{}",
-            &meta.remote_addr[..colon_ix],
-            meta.graphql_control_port
-        );
-        if results.contains(&addr) {
-            continue;
+        for object_meta in list_results {
+            let bytes = self
+                .gcs
+                .get(&object_meta.location)
+                .await
+                .unwrap()
+                .bytes()
+                .await
+                .unwrap();
+            let meta: MetaToBeSaved = serde_json::from_slice(&bytes).unwrap();
+            let colon_ix = meta.remote_addr.find(':').ok_or_else(|| {
+                format!(
+                    "wrong remote address in submission {}: {}",
+                    object_meta.location, meta.remote_addr
+                )
+            })?;
+            let addr = format!(
+                "{}:{}",
+                &meta.remote_addr[..colon_ix],
+                meta.graphql_control_port
+            );
+            if results.contains(&addr) {
+                continue;
+            }
+            results.insert(addr.clone());
+            if params.limit > 0 && results.len() >= params.limit {
+                break;
+            }
         }
-        results.insert(addr.clone());
-        if params.limit > 0 && results.len() >= params.limit {
-            break;
-        }
+        Ok(results.into_iter().collect())
     }
-    Ok(results.into_iter().collect())
 }
