@@ -3,12 +3,14 @@
 
 use std::path::PathBuf;
 use structopt::StructOpt;
+use trace_consumer::TraceConsumer;
 
 mod authentication;
 mod discovery;
 mod graphql;
 mod log_entry;
 mod mina_server;
+mod trace_consumer;
 mod utils;
 
 #[derive(Debug, StructOpt)]
@@ -64,6 +66,7 @@ async fn main() {
         println!("participants: {:?}", participants);
     }
     let opts = Opts::from_args();
+    let main_trace_file_path = opts.output_dir_path.join("internal-trace.jsonl");
     let secret_key_base64 = std::fs::read_to_string(opts.secret_key_path).unwrap();
     let config = mina_server::MinaServerConfig {
         secret_key_base64,
@@ -72,6 +75,12 @@ async fn main() {
         use_https: opts.https,
     };
     let mut mina_server = mina_server::MinaServer::new(config);
+
+    let mut consumer = TraceConsumer::new(main_trace_file_path, 3999);
+
+    tokio::spawn(async move {
+        consumer.run().await;
+    });
 
     // TODO: whenever authorization fails after it initially worked
     // we have to keep retrying because that means that the node got restarted.
