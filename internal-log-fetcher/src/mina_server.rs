@@ -13,6 +13,7 @@ use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose, Engine};
 use graphql_client::GraphQLQuery;
 use std::{fs::File, io::Write, path::PathBuf};
+use tracing::{error, info, instrument};
 
 #[derive(Default, Clone)]
 pub struct AuthorizationInfo {
@@ -54,7 +55,10 @@ impl MinaServer {
         };
         let pk_base64 = general_purpose::STANDARD.encode(keypair.public.as_bytes());
         let schema = if config.use_https { "https" } else { "http" };
-        let graphql_uri = format!("{}://{}:{}/graphql", schema, config.address, config.graphql_port);
+        let graphql_uri = format!(
+            "{}://{}:{}/graphql",
+            schema, config.address, config.graphql_port
+        );
 
         std::fs::create_dir_all(&config.output_dir_path).expect("Could not create output dir");
 
@@ -75,15 +79,13 @@ impl MinaServer {
         }
     }
 
-    pub async fn authorize(&mut self) {
-        let auth = self
-            .perform_auth_query()
-            .await
-            .expect("Authorization failed");
+    pub async fn authorize(&mut self) -> Result<()> {
+        let auth = self.perform_auth_query().await?;
         self.authorization_info = Some(AuthorizationInfo {
             server_uuid: auth.server_uuid,
             signer_sequence_number: auth.signer_sequence_number.parse().unwrap(),
         });
+        Ok(())
     }
 
     pub async fn fetch_more_logs(&mut self) -> bool {
@@ -197,8 +199,17 @@ impl MinaServer {
         Ok(())
     }
 
+    #[instrument(
+        skip(self),
+        fields(
+            node = %self.graphql_uri
+        ),
+    )]
     pub async fn authorize_and_run_fetch_loop(&mut self) -> Result<()> {
-        self.authorize().await;
+        match self.authorize().await {
+            Ok(()) => info!("Authorization Successfull"),
+            Err(e) => error!("Authorization failed: {}", e),
+        }
 
         loop {
             if self.fetch_more_logs().await {

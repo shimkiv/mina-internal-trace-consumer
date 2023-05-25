@@ -15,7 +15,11 @@ impl NodeIdentity {
     }
 
     pub fn construct_directory_name(&self) -> String {
-        let trimmed_pk = self.submitter_pk.clone().map(|pk| pk[pk.len() - 8..].to_string()).unwrap_or_default();
+        let trimmed_pk = self
+            .submitter_pk
+            .clone()
+            .map(|pk| pk[pk.len() - 8..].to_string())
+            .unwrap_or_default();
 
         format!("{}-{}-{}", trimmed_pk, self.ip, self.graphql_port)
     }
