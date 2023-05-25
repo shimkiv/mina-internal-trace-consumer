@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use anyhow::{Context, Result};
+use node::NodeIdentity;
 use std::path::PathBuf;
 use structopt::StructOpt;
 use trace_consumer::TraceConsumer;
@@ -9,6 +10,7 @@ use trace_consumer::TraceConsumer;
 mod authentication;
 mod discovery;
 mod graphql;
+mod node;
 mod log_entry;
 mod mina_server;
 mod trace_consumer;
@@ -36,11 +38,8 @@ enum Target {
         #[structopt(short = "p", long)]
         graphql_port: u16,
     },
-    #[structopt(about = "Specify full URL")]
-    FullUrl {
-        #[structopt(name = "URL")]
-        url: String,
-    },
+    #[structopt(about = "Use node discovery")]
+    Discovery,
 }
 
 fn read_secret_key_base64(secret_key_path: &PathBuf) -> Result<String> {
@@ -50,6 +49,11 @@ fn read_secret_key_base64(secret_key_path: &PathBuf) -> Result<String> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+
+    let opts = Opts::from_args();
+    let main_trace_file_path = opts.output_dir_path.join("internal-trace.jsonl");
+    let secret_key_base64 = read_secret_key_base64(&opts.secret_key_path)?;
+
     // TODO for discovery
     // - Remove cli args, not needed anymore (or instead add a subcommand to support fetching from specific node or discovery)
     // - from the discovery, obtain the list of node addresses
@@ -57,40 +61,72 @@ async fn main() -> Result<()> {
     // - Launch a new tokio task that runs the mina server handle `authorize_and_run_fetch_loop` with an unique
     //   output directory for the specific node
     // - Launch a consumer program instance with that directory as input
-    if false {
-        let mut discovery = discovery::DiscoveryService::try_new()?;
 
-        let participants = discovery
-            .discover_participants(discovery::DiscoveryParams {
-                offset_min: 15,
-                limit: 10_000,
-                only_block_producers: false,
-            })
-            .await?;
+    let nodes: Vec<NodeIdentity> = match opts.target {
+        Target::NodeAddressPort { address, graphql_port } => vec![NodeIdentity { ip: address, graphql_port, submitter_pk: None}],
+        Target::Discovery => {
+            let mut discovery = discovery::DiscoveryService::try_new()?;
 
-        println!("participants: {:?}", participants);
-    }
-    let opts = Opts::from_args();
-    let main_trace_file_path = opts.output_dir_path.join("internal-trace.jsonl");
-    let secret_key_base64 = read_secret_key_base64(&opts.secret_key_path)?;
-    let config = mina_server::MinaServerConfig {
-        secret_key_base64,
-        target: opts.target,
-        output_dir_path: opts.output_dir_path,
-        use_https: opts.https,
+            let participants = discovery
+                .discover_participants(discovery::DiscoveryParams {
+                    offset_min: 15,
+                    limit: 10_000,
+                    only_block_producers: false,
+                })
+                .await?;
+
+            println!("participants: {:?}", participants);
+            participants
+        }
     };
-    let mut mina_server = mina_server::MinaServer::new(config);
+
+    for node in nodes {
+        let output_dir_path = opts.output_dir_path.join(node.construct_directory_name());
+        if !output_dir_path.exists() {
+            std::fs::create_dir(&output_dir_path)?
+        }
+
+        println!("Creating thread for node: {}", node.construct_directory_name());
+
+        let config = mina_server::MinaServerConfig {
+            secret_key_base64: secret_key_base64.clone(),
+            address: node.ip,
+            graphql_port: node.graphql_port,
+            use_https: false,
+            output_dir_path,
+        };
+        tokio::spawn(async move {
+            let mut mina_server = mina_server::MinaServer::new(config);
+            if let Err(e) = mina_server.authorize_and_run_fetch_loop().await {
+                println!("Error: {}", e)
+            }
+        });
+    }
+
+    let mut signal_stream =
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("Unable to handle SIGTERM");
+
+    tokio::select! {
+        s = tokio::signal::ctrl_c() => {
+            s.expect("Failed to listen for ctrl-c event");
+            println!("Ctrl-c or SIGINT received!");
+        }
+        _ = signal_stream.recv() => {
+            println!("SIGTERM received!");
+        }
+    }
 
     // TODO: make consumer exe path configurable
-    let mut consumer = TraceConsumer::new(
-        "../_build/default/src/internal_trace_consumer.exe".into(),
-        main_trace_file_path,
-        3999,
-    );
+    // let mut consumer = TraceConsumer::new(
+    //     "../_build/default/src/internal_trace_consumer.exe".into(),
+    //     main_trace_file_path,
+    //     3999,
+    // );
 
-    tokio::spawn(async move {
-        let _ = consumer.run().await;
-    });
+    // tokio::spawn(async move {
+    //     let _ = consumer.run().await;
+    // });
 
     // TODO: whenever authorization fails after it initially worked
     // we have to keep retrying because that means that the node got restarted.
@@ -98,7 +134,7 @@ async fn main() -> Result<()> {
     // from different node runs is not clean, because the new instance will re-process
     // the same blocks but through a different path, so it all gets mixed up).
     // Is it better to handle that here in the program, or have an external script do it?
-    mina_server.authorize_and_run_fetch_loop().await?;
+    // mina_server.authorize_and_run_fetch_loop().await?;
 
     Ok(())
 }

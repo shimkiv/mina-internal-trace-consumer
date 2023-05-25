@@ -21,7 +21,8 @@ pub struct AuthorizationInfo {
 }
 
 pub(crate) struct MinaServerConfig {
-    pub(crate) target: Target,
+    pub(crate) address: String,
+    pub(crate) graphql_port: u16,
     pub(crate) use_https: bool,
     pub(crate) secret_key_base64: String,
     pub(crate) output_dir_path: PathBuf,
@@ -53,13 +54,7 @@ impl MinaServer {
         };
         let pk_base64 = general_purpose::STANDARD.encode(keypair.public.as_bytes());
         let schema = if config.use_https { "https" } else { "http" };
-        let graphql_uri = match config.target {
-            Target::NodeAddressPort {
-                address,
-                graphql_port,
-            } => format!("{}://{}:{}/graphql", schema, address, graphql_port),
-            Target::FullUrl { url } => url,
-        };
+        let graphql_uri = format!("{}://{}:{}/graphql", schema, config.address, config.graphql_port);
 
         std::fs::create_dir_all(&config.output_dir_path).expect("Could not create output dir");
 
@@ -173,7 +168,9 @@ impl MinaServer {
                 let log = LogEntry::try_from(item).unwrap();
                 let log_json =
                     serde_json::to_string(&log).expect("Failed to serialize LogEntry as JSON");
-                println!("{log_json}");
+                // TODO: loging
+                // println!("Log entries saved");
+                // println!("{log_json}");
                 log_file_handle.write_all(log_json.as_bytes()).unwrap();
                 log_file_handle.write_all(b"\n").unwrap();
             }

@@ -10,7 +10,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-type NodeAddress = String;
+use crate::node::NodeIdentity;
 
 #[derive(Deserialize)]
 struct MetaToBeSaved {
@@ -34,7 +34,7 @@ pub struct DiscoveryParams {
 
 pub struct DiscoveryService {
     gcs: GoogleCloudStorage,
-    node_data: HashMap<NodeAddress, NodeData>,
+    node_data: HashMap<NodeIdentity, NodeData>,
 }
 
 fn offset_by_time(t: DateTime<Utc>) -> String {
@@ -53,7 +53,7 @@ impl DiscoveryService {
     pub async fn discover_participants(
         &mut self,
         params: DiscoveryParams,
-    ) -> Result<Vec<NodeAddress>> {
+    ) -> Result<Vec<NodeIdentity>> {
         let before = Utc::now() - chrono::Duration::minutes(params.offset_min as i64);
         let offset: Path = offset_by_time(before).try_into()?;
         let prefix: Path = "submissions".into();
@@ -75,11 +75,11 @@ impl DiscoveryService {
                     meta.remote_addr
                 )
             })?;
-            let addr = format!(
-                "{}:{}",
-                &meta.remote_addr[..colon_ix],
-                meta.graphql_control_port
-            );
+            let addr = NodeIdentity {
+                ip: meta.remote_addr[..colon_ix].to_string(),
+                graphql_port: meta.graphql_control_port,
+                submitter_pk: Some(meta.submitter),
+            };
             if results.contains(&addr) {
                 continue;
             }
