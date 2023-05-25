@@ -83,19 +83,19 @@ impl MinaServer {
         let auth = self.perform_auth_query().await?;
         self.authorization_info = Some(AuthorizationInfo {
             server_uuid: auth.server_uuid,
-            signer_sequence_number: auth.signer_sequence_number.parse().unwrap(),
+            signer_sequence_number: auth.signer_sequence_number.parse()?,
         });
         Ok(())
     }
 
-    pub async fn fetch_more_logs(&mut self) -> bool {
+    pub async fn fetch_more_logs(&mut self) -> Result<bool> {
         let prev_last_log_id = self.last_log_id;
-        self.last_log_id = self.perform_fetch_internal_logs_query().await.unwrap();
+        self.last_log_id = self.perform_fetch_internal_logs_query().await?;
         if let Some(auth_info) = &mut self.authorization_info {
             auth_info.signer_sequence_number += 1;
         }
 
-        prev_last_log_id < self.last_log_id
+        Ok(prev_last_log_id < self.last_log_id)
     }
 
     pub async fn flush_logs(&mut self) -> Result<()> {
@@ -212,7 +212,7 @@ impl MinaServer {
         }
 
         loop {
-            if self.fetch_more_logs().await {
+            if self.fetch_more_logs().await? {
                 // TODO: make this configurable? we don't want to do it by default
                 // because we may have many replicas of the discovery+fetcher service running
                 if false {

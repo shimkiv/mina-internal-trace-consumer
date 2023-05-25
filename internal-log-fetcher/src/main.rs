@@ -3,10 +3,13 @@
 
 use anyhow::{Context, Result};
 use node::NodeIdentity;
-use std::{path::PathBuf, sync::{Arc, RwLock}};
+use std::{
+    path::PathBuf,
+    sync::{Arc, RwLock},
+};
 use structopt::StructOpt;
 use trace_consumer::TraceConsumer;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 mod authentication;
 mod discovery;
@@ -14,9 +17,9 @@ mod graphql;
 mod log_entry;
 mod mina_server;
 mod node;
+mod rpc;
 mod trace_consumer;
 mod utils;
-mod rpc;
 
 // TODO: make this a complex structure, so we can store other data if needed for FE
 type SharedData = Arc<RwLock<Vec<NodeIdentity>>>;
@@ -52,6 +55,11 @@ fn read_secret_key_base64(secret_key_path: &PathBuf) -> Result<String> {
         .with_context(|| format!("Failed to read secret key from {:?}", secret_key_path))
 }
 
+// TODO:
+// - improve management of consumer subprocesses
+// - for each run we may want to move old data to another directory because mixing traces from different runs can mess things up
+// - when a node is restarted we may want to archive the current traces too and start fresh
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // set up logging
@@ -66,16 +74,7 @@ async fn main() -> Result<()> {
     tracing::subscriber::set_global_default(subscriber)?;
 
     let opts = Opts::from_args();
-    let main_trace_file_path = opts.output_dir_path.join("internal-trace.jsonl");
     let secret_key_base64 = read_secret_key_base64(&opts.secret_key_path)?;
-
-    // TODO for discovery
-    // - x Remove cli args, not needed anymore (or instead add a subcommand to support fetching from specific node or discovery)
-    // - x from the discovery, obtain the list of node addresses
-    // - x For each result that was not seen before, create a `MinaServerConfig` and `MinaServer` with that config
-    // - x Launch a new tokio task that runs the mina server handle `authorize_and_run_fetch_loop` with an unique
-    //   output directory for the specific node
-    // - Launch a consumer program instance with that directory as input
 
     let nodes: Vec<NodeIdentity> = match opts.target {
         Target::NodeAddressPort {
@@ -97,18 +96,26 @@ async fn main() -> Result<()> {
                 })
                 .await?;
 
-            info!("participants: {:?}", participants);
+            info!("Participants: {:?}", participants);
             participants
         }
     };
 
     let t_nodes = Arc::new(RwLock::new(nodes.clone()));
-    rpc::spawn_rpc_server(4000, t_nodes);
+
+    let rest_port = 4000;
+    info!("Spawning REST API server at port {rest_port}");
+    rpc::spawn_rpc_server(rest_port, t_nodes);
+
+    let mut trace_server_port = 11000_u16;
 
     for node in nodes {
+        debug!("Handling Node: {:?}", node);
         let output_dir_path = opts.output_dir_path.join(node.construct_directory_name());
+        let main_trace_file_path = output_dir_path.join("internal-trace.jsonl");
+
         if !output_dir_path.exists() {
-            std::fs::create_dir(&output_dir_path)?
+            std::fs::create_dir_all(&output_dir_path)?
         }
 
         info!(
@@ -126,9 +133,27 @@ async fn main() -> Result<()> {
         tokio::spawn(async move {
             let mut mina_server = mina_server::MinaServer::new(config);
             if let Err(e) = mina_server.authorize_and_run_fetch_loop().await {
-                error!("Error: {}", e)
+                error!("Error when running authorize and fetch loop: {}", e)
             }
         });
+        tokio::spawn(async move {
+            debug!(
+                "Spawning consumer at port {trace_server_port}, with trace file: {}",
+                main_trace_file_path.display()
+            );
+            // TODO: make consumer exe path configurable
+            let mut consumer = TraceConsumer::new(
+                "../_build/default/src/internal_trace_consumer.exe".into(),
+                main_trace_file_path,
+                trace_server_port,
+            );
+
+            if let Err(e) = consumer.run().await {
+                error!("Error when running consumer process: {}", e)
+            }
+        });
+
+        trace_server_port += 1;
     }
 
     let mut signal_stream =
@@ -144,17 +169,6 @@ async fn main() -> Result<()> {
             info!("SIGTERM received!");
         }
     }
-
-    // TODO: make consumer exe path configurable
-    // let mut consumer = TraceConsumer::new(
-    //     "../_build/default/src/internal_trace_consumer.exe".into(),
-    //     main_trace_file_path,
-    //     3999,
-    // );
-
-    // tokio::spawn(async move {
-    //     let _ = consumer.run().await;
-    // });
 
     // TODO: whenever authorization fails after it initially worked
     // we have to keep retrying because that means that the node got restarted.
