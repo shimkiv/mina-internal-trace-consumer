@@ -1,4 +1,6 @@
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+use serde::Serialize;
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize)]
 pub struct NodeIdentity {
     pub ip: String,
     pub graphql_port: u16,

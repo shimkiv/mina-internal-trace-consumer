@@ -3,7 +3,7 @@
 
 use anyhow::{Context, Result};
 use node::NodeIdentity;
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::{Arc, RwLock}};
 use structopt::StructOpt;
 use trace_consumer::TraceConsumer;
 use tracing::{error, info};
@@ -16,6 +16,10 @@ mod mina_server;
 mod node;
 mod trace_consumer;
 mod utils;
+mod rpc;
+
+// TODO: make this a complex structure, so we can store other data if needed for FE
+type SharedData = Arc<RwLock<Vec<NodeIdentity>>>;
 
 #[derive(Debug, StructOpt)]
 #[structopt(about = "Internal logging fetcher.")]
@@ -97,6 +101,9 @@ async fn main() -> Result<()> {
             participants
         }
     };
+
+    let t_nodes = Arc::new(RwLock::new(nodes.clone()));
+    rpc::spawn_rpc_server(4000, t_nodes);
 
     for node in nodes {
         let output_dir_path = opts.output_dir_path.join(node.construct_directory_name());
