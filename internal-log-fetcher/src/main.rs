@@ -144,9 +144,12 @@ async fn main() -> Result<()> {
                 node.internal_trace_port,
                 main_trace_file_path.display()
             );
-            // TODO: make consumer exe path configurable
+            let consumer_executable_path = std::env::var("INTERNAL_TRACE_CONSUMER_EXE")
+                .unwrap_or_else(|_| {
+                    "../_build/default/src/internal_trace_consumer.exe".to_string()
+                });
             let mut consumer = TraceConsumer::new(
-                "../_build/default/src/internal_trace_consumer.exe".into(),
+                consumer_executable_path.into(),
                 main_trace_file_path,
                 node.internal_trace_port,
             );
