@@ -5,14 +5,21 @@ pub struct NodeIdentity {
     pub ip: String,
     pub graphql_port: u16,
     pub submitter_pk: Option<String>,
+    pub internal_trace_port: u16,
 }
 
 impl NodeIdentity {
-    pub fn new(ip: String, graphql_port: u16, submitter_pk: Option<String>) -> Self {
+    pub fn new(
+        ip: String,
+        graphql_port: u16,
+        submitter_pk: Option<String>,
+        internal_trace_port: u16,
+    ) -> Self {
         NodeIdentity {
             ip,
             graphql_port,
             submitter_pk,
+            internal_trace_port,
         }
     }
 

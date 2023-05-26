@@ -75,6 +75,7 @@ async fn main() -> Result<()> {
 
     let opts = Opts::from_args();
     let secret_key_base64 = read_secret_key_base64(&opts.secret_key_path)?;
+    let initial_trace_server_port = 11000_u16;
 
     let nodes: Vec<NodeIdentity> = match opts.target {
         Target::NodeAddressPort {
@@ -84,16 +85,20 @@ async fn main() -> Result<()> {
             ip: address,
             graphql_port,
             submitter_pk: None,
+            internal_trace_port: initial_trace_server_port,
         }],
         Target::Discovery => {
             let mut discovery = discovery::DiscoveryService::try_new()?;
 
             let participants = discovery
-                .discover_participants(discovery::DiscoveryParams {
-                    offset_min: 15,
-                    limit: 10_000,
-                    only_block_producers: false,
-                })
+                .discover_participants(
+                    discovery::DiscoveryParams {
+                        offset_min: 15,
+                        limit: 10_000,
+                        only_block_producers: false,
+                    },
+                    initial_trace_server_port,
+                )
                 .await?;
 
             info!("Participants: {:?}", participants);
@@ -102,12 +107,9 @@ async fn main() -> Result<()> {
     };
 
     let t_nodes = Arc::new(RwLock::new(nodes.clone()));
-
     let rest_port = 4000;
     info!("Spawning REST API server at port {rest_port}");
     rpc::spawn_rpc_server(rest_port, t_nodes);
-
-    let mut trace_server_port = 11000_u16;
 
     for node in nodes {
         debug!("Handling Node: {:?}", node);
@@ -138,22 +140,21 @@ async fn main() -> Result<()> {
         });
         tokio::spawn(async move {
             debug!(
-                "Spawning consumer at port {trace_server_port}, with trace file: {}",
+                "Spawning consumer at port {}, with trace file: {}",
+                node.internal_trace_port,
                 main_trace_file_path.display()
             );
             // TODO: make consumer exe path configurable
             let mut consumer = TraceConsumer::new(
                 "../_build/default/src/internal_trace_consumer.exe".into(),
                 main_trace_file_path,
-                trace_server_port,
+                node.internal_trace_port,
             );
 
             if let Err(e) = consumer.run().await {
                 error!("Error when running consumer process: {}", e)
             }
         });
-
-        trace_server_port += 1;
     }
 
     let mut signal_stream =

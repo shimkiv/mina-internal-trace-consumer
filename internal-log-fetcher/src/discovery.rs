@@ -53,6 +53,7 @@ impl DiscoveryService {
     pub async fn discover_participants(
         &mut self,
         params: DiscoveryParams,
+        initial_trace_server_port: u16,
     ) -> Result<Vec<NodeIdentity>> {
         let before = Utc::now() - chrono::Duration::minutes(params.offset_min as i64);
         let offset: Path = offset_by_time(before).try_into()?;
@@ -79,6 +80,7 @@ impl DiscoveryService {
                 ip: meta.remote_addr[..colon_ix].to_string(),
                 graphql_port: meta.graphql_control_port,
                 submitter_pk: Some(meta.submitter),
+                internal_trace_port: 0,
             };
             if results.contains(&addr) {
                 continue;
@@ -88,6 +90,14 @@ impl DiscoveryService {
                 break;
             }
         }
-        Ok(results.into_iter().collect())
+
+        // Collecting to a vec here to be able to assign correct internal_trace_port. We do it here
+        // so we keep the uniques in the HashSet (if we assign ports in the hashset, we could have duplicate values
+        // because the additional property internal_trace_port).
+        let mut result_vec: Vec<NodeIdentity> = results.into_iter().collect();
+        result_vec.iter_mut().enumerate().for_each(|(i, node)| {
+            node.internal_trace_port = initial_trace_server_port + (i as u16)
+        });
+        Ok(result_vec)
     }
 }
