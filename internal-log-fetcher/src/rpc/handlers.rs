@@ -1,22 +1,38 @@
+// Copyright (c) Viable Systems
+// SPDX-License-Identifier: Apache-2.0
+
 use reqwest::StatusCode;
-use tracing::error;
+use serde::Serialize;
 
-use crate::{node::NodeIdentity, SharedData};
+use crate::{node::NodeIdentity, NodeInfo, SharedAvailableNodes};
 
-pub async fn get_nodes_handle(
-    data: SharedData,
-) -> Result<impl warp::Reply, warp::reject::Rejection> {
-    match data.read() {
-        Ok(read_locked_data) => Ok(warp::reply::with_status(
-            warp::reply::json(&read_locked_data.clone()),
-            StatusCode::OK,
-        )),
-        Err(e) => {
-            error!("Lock poisoned: {}", e);
-            Ok(warp::reply::with_status(
-                warp::reply::json(&Vec::<NodeIdentity>::new()),
-                StatusCode::INTERNAL_SERVER_ERROR,
-            ))
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize)]
+pub struct NodeDescription {
+    pub ip: String,
+    pub graphql_port: u16,
+    pub submitter_pk: Option<String>,
+    pub internal_trace_port: u16,
+}
+
+impl From<(&NodeIdentity, &NodeInfo)> for NodeDescription {
+    fn from(id_and_info: (&NodeIdentity, &NodeInfo)) -> Self {
+        let (id, info) = id_and_info;
+        Self {
+            ip: id.ip.clone(),
+            graphql_port: id.graphql_port,
+            submitter_pk: id.submitter_pk.clone(),
+            internal_trace_port: info.internal_tracing_port,
         }
     }
+}
+
+pub async fn get_nodes_handle(
+    available_nodes: SharedAvailableNodes,
+) -> Result<impl warp::Reply, warp::reject::Rejection> {
+    let manager = available_nodes.0.read().await;
+    let results: Vec<NodeDescription> = manager.iter().cloned().collect();
+    Ok(warp::reply::with_status(
+        warp::reply::json(&results),
+        StatusCode::OK,
+    ))
 }

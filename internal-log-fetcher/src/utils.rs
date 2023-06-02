@@ -1,11 +1,11 @@
 // Copyright (c) Viable Systems
 // SPDX-License-Identifier: Apache-2.0
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use std::{
     fs::{File, OpenOptions},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 pub fn maybe_open<P>(file_opt: &mut Option<File>, path: P) -> Result<&mut File>
@@ -33,6 +33,11 @@ pub fn convert_timestamp_to_float(timestamp: &str) -> Result<f64, chrono::ParseE
     let float_value = duration_since_epoch / 1_000_000_000_f64;
 
     Ok(float_value)
+}
+
+pub fn read_secret_key_base64(secret_key_path: &PathBuf) -> Result<String> {
+    std::fs::read_to_string(secret_key_path)
+        .with_context(|| format!("Failed to read secret key from {:?}", secret_key_path))
 }
 
 #[cfg(test)]

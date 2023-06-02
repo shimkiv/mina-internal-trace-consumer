@@ -7,23 +7,17 @@ use futures_util::StreamExt;
 use object_store::gcp::{GoogleCloudStorage, GoogleCloudStorageBuilder};
 use object_store::{path::Path, ObjectStore};
 use serde::Deserialize;
-use std::collections::HashMap;
 use std::collections::HashSet;
+use tracing::info;
 
 use crate::node::NodeIdentity;
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct MetaToBeSaved {
     remote_addr: String,
     peer_id: String,
     submitter: String,
     graphql_control_port: u16,
-}
-
-pub struct NodeData {
-    is_block_producer: bool,
-    peer_id: String,
-    submitted: String,
 }
 
 pub struct DiscoveryParams {
@@ -34,7 +28,6 @@ pub struct DiscoveryParams {
 
 pub struct DiscoveryService {
     gcs: GoogleCloudStorage,
-    node_data: HashMap<NodeIdentity, NodeData>,
 }
 
 fn offset_by_time(t: DateTime<Utc>) -> String {
@@ -46,58 +39,58 @@ fn offset_by_time(t: DateTime<Utc>) -> String {
 impl DiscoveryService {
     pub fn try_new() -> Result<Self> {
         let gcs = GoogleCloudStorageBuilder::from_env().build()?;
-        let node_data = HashMap::new();
-        Ok(Self { gcs, node_data })
+        Ok(Self { gcs })
     }
 
     pub async fn discover_participants(
         &mut self,
         params: DiscoveryParams,
-        initial_trace_server_port: u16,
-    ) -> Result<Vec<NodeIdentity>> {
+    ) -> Result<HashSet<NodeIdentity>> {
         let before = Utc::now() - chrono::Duration::minutes(params.offset_min as i64);
         let offset: Path = offset_by_time(before).try_into()?;
         let prefix: Path = "submissions".into();
         let it = self.gcs.list_with_offset(Some(&prefix), &offset).await?;
         let mut results = HashSet::new();
-        // TODO: do something with errors (probably add logger and report them)
-        let list_results: Vec<_> = it
-            .filter_map(|result| async { result.ok() })
-            .collect()
-            .await;
+        let list_results: Vec<_> = it.collect().await;
+        info!("Results count {}", list_results.len());
 
-        for object_meta in list_results {
-            let bytes = self.gcs.get(&object_meta.location).await?.bytes().await?;
+        // TODO: do something with errors (probably add logger and report them)
+        let list_results: Vec<_> = list_results
+            .into_iter()
+            .filter_map(|result| result.ok())
+            .rev()
+            .take(10)
+            .collect();
+
+        let futures = list_results.into_iter().map(|object_meta| async move {
+            let gcs = GoogleCloudStorageBuilder::from_env().build()?;
+            let bytes = gcs.get_range(&object_meta.location, 0..1_000_000_000).await?;
             let meta: MetaToBeSaved = serde_json::from_slice(&bytes)?;
+            Ok((object_meta.location, meta))
+        });
+
+        let gcs_results: Vec<anyhow::Result<(Path, MetaToBeSaved)>> =
+            futures_util::future::join_all(futures).await;
+        let gcs_results = gcs_results.into_iter().filter_map(|result| result.ok());
+
+        for (location, meta) in gcs_results {
             let colon_ix = meta.remote_addr.find(':').ok_or_else(|| {
                 anyhow!(
                     "wrong remote address in submission {}: {}",
-                    object_meta.location,
+                    location,
                     meta.remote_addr
                 )
             })?;
-            let addr = NodeIdentity {
+            results.insert(NodeIdentity {
                 ip: meta.remote_addr[..colon_ix].to_string(),
                 graphql_port: meta.graphql_control_port,
                 submitter_pk: Some(meta.submitter),
-                internal_trace_port: 0,
-            };
-            if results.contains(&addr) {
-                continue;
-            }
-            results.insert(addr.clone());
+            });
             if params.limit > 0 && results.len() >= params.limit {
                 break;
             }
         }
 
-        // Collecting to a vec here to be able to assign correct internal_trace_port. We do it here
-        // so we keep the uniques in the HashSet (if we assign ports in the hashset, we could have duplicate values
-        // because the additional property internal_trace_port).
-        let mut result_vec: Vec<NodeIdentity> = results.into_iter().collect();
-        result_vec.iter_mut().enumerate().for_each(|(i, node)| {
-            node.internal_trace_port = initial_trace_server_port + (i as u16)
-        });
-        Ok(result_vec)
+        Ok(results)
     }
 }

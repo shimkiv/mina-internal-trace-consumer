@@ -1,3 +1,6 @@
+// Copyright (c) Viable Systems
+// SPDX-License-Identifier: Apache-2.0
+
 use crate::{
     graphql::internal_logs_query::InternalLogsQueryInternalLogs, utils::convert_timestamp_to_float,
 };

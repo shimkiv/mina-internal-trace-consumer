@@ -25,8 +25,8 @@ impl TraceConsumer {
         }
     }
 
-    pub async fn run(&mut self) -> tokio::io::Result<()> {
-        let mut child = Command::new(&self.consumer_executable_path)
+    pub async fn run(&mut self) -> tokio::io::Result<tokio::process::Child> {
+        let child = Command::new(&self.consumer_executable_path)
             .arg("serve")
             .arg("--trace-file")
             .arg(&self.main_trace_file_path)
@@ -37,12 +37,6 @@ impl TraceConsumer {
             .kill_on_drop(true)
             .spawn()?;
 
-        // TODO: provide a way to shut down the process if required
-
-        if let Err(status) = child.wait().await {
-            println!("consumer subprocess exited with non-zero status: {status}");
-        }
-
-        Ok(())
+        tokio::io::Result::Ok(child)
     }
 }

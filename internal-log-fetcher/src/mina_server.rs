@@ -1,13 +1,11 @@
 // Copyright (c) Viable Systems
 // SPDX-License-Identifier: Apache-2.0
 
-// TODO: improve error handling
-
 use crate::{
     authentication::{Authenticator, BasicAuthenticator, SequentialAuthenticator},
     graphql,
     log_entry::LogEntry,
-    utils, Target,
+    utils,
 };
 use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose, Engine};
@@ -207,21 +205,37 @@ impl MinaServer {
     )]
     pub async fn authorize_and_run_fetch_loop(&mut self) -> Result<()> {
         match self.authorize().await {
-            Ok(()) => info!("Authorization Successfull"),
-            Err(e) => error!("Authorization failed: {}", e),
+            Ok(()) => info!("Authorization Successful"),
+            Err(e) => {
+                error!("Authorization failed for node: {}", e);
+                Err(e)?
+            }
         }
 
+        let mut remaining_retries = 5;
+
         loop {
-            if self.fetch_more_logs().await? {
-                // TODO: make this configurable? we don't want to do it by default
-                // because we may have many replicas of the discovery+fetcher service running
-                if false {
-                    self.flush_logs().await?;
+            match self.fetch_more_logs().await {
+                Ok(true) => {
+                    // TODO: make this configurable? we don't want to do it by default
+                    // because we may have many replicas of the discovery+fetcher service running
+                    if false {
+                        self.flush_logs().await?;
+                    }
+                    remaining_retries = 5
+                }
+                Ok(false) => remaining_retries = 5,
+                Err(error) => {
+                    error!("Error when fetching logs {error}");
+                    remaining_retries -= 1;
+
+                    if remaining_retries <= 0 {
+                        error!("Finishing fetcher loop");
+                        return Err(error);
+                    }
                 }
             }
-            // TODO: handle the case where fetch_more_logs fails because of an authentication
-            // that was previously successful, this means that the server crashed
-            // and a new trace is being producer
+
             std::thread::sleep(std::time::Duration::from_secs(10));
         }
     }

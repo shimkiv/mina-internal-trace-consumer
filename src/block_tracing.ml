@@ -260,8 +260,13 @@ let handle_status_change status block_id =
   | _ ->
       ()
 
+let checkpoints_cache = String.Table.create ()
+
+let dedup_checkpoint checkpoint = String.Table.find_or_add checkpoints_cache checkpoint ~default:(fun () -> printf "Adding %s\n%!" checkpoint; checkpoint)
+
 let checkpoint ?metadata ~block_id ~target_trace ?(order = `Append) ~checkpoint
     ~timestamp () =
+  let checkpoint = dedup_checkpoint checkpoint in
   let source = compute_source checkpoint in
   let status = compute_status checkpoint in
   (* NOTE: here, if successful or failed, the structured trace can be built and stored in the db *)

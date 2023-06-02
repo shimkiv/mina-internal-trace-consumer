@@ -1,3 +1,6 @@
+// Copyright (c) Viable Systems
+// SPDX-License-Identifier: Apache-2.0
+
 use serde::Serialize;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize)]
@@ -5,7 +8,7 @@ pub struct NodeIdentity {
     pub ip: String,
     pub graphql_port: u16,
     pub submitter_pk: Option<String>,
-    pub internal_trace_port: u16,
+    //pub internal_trace_port: u16,
 }
 
 impl NodeIdentity {
@@ -13,13 +16,13 @@ impl NodeIdentity {
         ip: String,
         graphql_port: u16,
         submitter_pk: Option<String>,
-        internal_trace_port: u16,
+        //internal_trace_port: u16,
     ) -> Self {
         NodeIdentity {
             ip,
             graphql_port,
             submitter_pk,
-            internal_trace_port,
+            //internal_trace_port,
         }
     }
 
