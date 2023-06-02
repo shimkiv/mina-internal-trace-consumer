@@ -104,9 +104,17 @@ let extract_blockchain_length metadata =
   |> Option.bind ~f:(fun json -> Yojson.Safe.Util.to_string_option json)
   |> Option.map ~f:Int.of_string
 
+(* Old format is just a string, new format is ["Since_genesis", "1345"], handle both *)
 let extract_global_slot metadata =
-  List.Assoc.find metadata ~equal:String.equal "global_slot"
-  |> Option.bind ~f:(fun json -> Yojson.Safe.Util.to_string_option json)
+  let result : Yojson.Safe.t option =
+    List.Assoc.find metadata ~equal:String.equal "global_slot"
+  in
+  result
+  |> Option.bind ~f:(function
+       | `List [ `String "Since_genesis"; `String global_slot ] ->
+           Some global_slot
+       | json ->
+           Yojson.Safe.Util.to_string_option json )
   |> Option.map ~f:Int.of_string
 
 let push_global_metadata ~metadata trace =
