@@ -94,6 +94,17 @@ module Queries = struct
     ]
 end
 
+let add_cors_headers (headers : Cohttp.Header.t) =
+  Cohttp.Header.add_list headers [
+    ("Access-Control-Allow-Origin", "*");
+    ("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS");
+    ("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  ]
+
+let respond_with_cors body status =
+  let headers = Cohttp.Header.init () |> add_cors_headers in
+  Cohttp_async.Server.respond_string ~status ~headers body
+
 let create_graphql_server ~bind_to_address ~schema ~server_description port =
   let graphql_callback =
     Graphql_cohttp_async.make_callback (fun _req -> ()) schema
@@ -109,22 +120,35 @@ let create_graphql_server ~bind_to_address ~schema ~server_description port =
       (fun ~body _sock req ->
         let uri = Cohttp.Request.uri req in
         let lift x = `Response x in
-        match Uri.path uri with
-        | "/" ->
-            let body =
-              "This page is intentionally left blank. The graphql endpoint can \
-               be found at `/graphql`."
-            in
-            Server.respond_string ~status:`OK body >>| lift
-        | "/graphql" ->
-            (* [%log debug] "Received graphql request. Uri: $uri"
-               ~metadata:
-                 [ ("uri", `String (Uri.to_string uri))
-                 ; ("context", `String "rest_server")
-                 ] ; *)
-            graphql_callback () req body
-        | _ ->
-            Server.respond_string ~status:`Not_found "Route not found" >>| lift
+        let lift_with_cors_graphql action =
+          match action with
+          | `Response (response, body) ->
+              let headers = Cohttp.Response.headers response in
+              let headers = add_cors_headers headers in
+              let response = { response with Cohttp.Response.headers } in
+              return (`Response (response, body))
+          | `Expert _ as action -> return action
+        in
+        match Cohttp.Request.meth req with
+        | `OPTIONS ->
+            respond_with_cors "" `OK >>| lift
+        | `GET | `POST | `PUT | `DELETE | `HEAD | `CONNECT | `TRACE | `PATCH ->
+            begin
+              match Uri.path uri with
+              | "" | "/" ->
+                  let body =
+                    "This page is intentionally left blank. The graphql endpoint can \
+                    be found at `/graphql`."
+                  in
+                  respond_with_cors body `OK >>| lift
+              | "/graphql" ->
+                  graphql_callback () req body
+                  >>= lift_with_cors_graphql
+              | _ ->
+                  respond_with_cors "Route not found" `Not_found >>| lift
+            end
+        | `Other _ ->
+            respond_with_cors "HTTP method not supported" `Method_not_allowed >>| lift
         ) )
   |> Deferred.map ~f:(fun _ ->
          printf "Created %s at: http://localhost:%i/graphql\n%!"
