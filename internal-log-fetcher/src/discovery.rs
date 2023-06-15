@@ -59,7 +59,6 @@ impl DiscoveryService {
             .into_iter()
             .filter_map(|result| result.ok())
             .rev()
-            .take(10)
             .collect();
 
         let futures = list_results.into_iter().map(|object_meta| async move {
