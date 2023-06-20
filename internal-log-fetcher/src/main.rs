@@ -115,6 +115,7 @@ impl Manager {
         match &mut self.node_discovery {
             NodeDiscoveryMode::Fixed(id) => Ok(HashSet::from_iter(vec![id.clone()].into_iter())),
             NodeDiscoveryMode::Discovery(discovery) => {
+                info!("Performing discovery...");
                 let participants = discovery
                     .discover_participants(discovery::DiscoveryParams {
                         offset_min: self.offset_min,

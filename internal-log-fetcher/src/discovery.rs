@@ -8,7 +8,7 @@ use object_store::gcp::{GoogleCloudStorage, GoogleCloudStorageBuilder};
 use object_store::{path::Path, ObjectStore};
 use serde::Deserialize;
 use std::collections::HashSet;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::node::NodeIdentity;
 
@@ -54,23 +54,36 @@ impl DiscoveryService {
         let list_results: Vec<_> = it.collect().await;
         info!("Results count {}", list_results.len());
 
-        // TODO: do something with errors (probably add logger and report them)
         let list_results: Vec<_> = list_results
             .into_iter()
-            .filter_map(|result| result.ok())
+            .filter_map(|result| match result {
+                Err(err) => {
+                    warn!("Got error when fetching listing objects: {:?}", err);
+                    None
+                }
+                Ok(result) => Some(result),
+            })
             .rev()
             .collect();
 
         let futures = list_results.into_iter().map(|object_meta| async move {
             let gcs = GoogleCloudStorageBuilder::from_env().build()?;
-            let bytes = gcs.get_range(&object_meta.location, 0..1_000_000_000).await?;
+            let bytes = gcs
+                .get_range(&object_meta.location, 0..1_000_000_000)
+                .await?;
             let meta: MetaToBeSaved = serde_json::from_slice(&bytes)?;
             Ok((object_meta.location, meta))
         });
 
         let gcs_results: Vec<anyhow::Result<(Path, MetaToBeSaved)>> =
             futures_util::future::join_all(futures).await;
-        let gcs_results = gcs_results.into_iter().filter_map(|result| result.ok());
+        let gcs_results = gcs_results.into_iter().filter_map(|result| match result {
+            Err(err) => {
+                warn!("Failure when fetching object: {:?}", err);
+                None
+            }
+            Ok(result) => Some(result),
+        });
 
         for (location, meta) in gcs_results {
             let colon_ix = meta.remote_addr.find(':').ok_or_else(|| {
