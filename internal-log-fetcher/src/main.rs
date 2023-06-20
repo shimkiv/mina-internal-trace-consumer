@@ -218,7 +218,8 @@ impl Manager {
         let output_dir_path = self
             .opts
             .output_dir_path
-            .join(node.construct_directory_name());
+            .join(node.construct_directory_name())
+            .canonicalize()?;
         let main_trace_file_path = output_dir_path.join("internal-trace.jsonl");
         let db_path = output_dir_path.join("traces.db");
 

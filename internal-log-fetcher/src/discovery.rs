@@ -49,6 +49,7 @@ impl DiscoveryService {
         let before = Utc::now() - chrono::Duration::minutes(params.offset_min as i64);
         let offset: Path = offset_by_time(before).try_into()?;
         let prefix: Path = "submissions".into();
+        info!("Obtaining list of objects in bucket...");
         let it = self.gcs.list_with_offset(Some(&prefix), &offset).await?;
         let mut results = HashSet::new();
         let list_results: Vec<_> = it.collect().await;
