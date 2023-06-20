@@ -1,7 +1,7 @@
 // Copyright (c) Viable Systems
 // SPDX-License-Identifier: Apache-2.0
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use node::NodeIdentity;
 use rpc::handlers::NodeDescription;
 use std::{
@@ -215,20 +215,28 @@ impl Manager {
 
     fn spawn_node(&mut self, node: &NodeIdentity) -> Result<()> {
         debug!("Handling Node: {:?}", node);
+        let node_dir_name = node.construct_directory_name();
         let output_dir_path = self
             .opts
             .output_dir_path
-            .join(node.construct_directory_name())
-            .canonicalize()?;
+            .join(&node_dir_name)
+            .canonicalize()
+            .context(format!("Computing output dir path for {node_dir_name}"))?;
         let main_trace_file_path = output_dir_path.join("internal-trace.jsonl");
         let db_path = output_dir_path.join("traces.db");
 
         if !output_dir_path.exists() {
-            std::fs::create_dir_all(&output_dir_path)?
+            std::fs::create_dir_all(&output_dir_path).context(format!(
+                "Creating output dir: {}",
+                output_dir_path.display()
+            ))?
         }
 
         let node_id = node.construct_directory_name();
-        let node_state = self.nodes.get(node).unwrap();
+        let node_state = self
+            .nodes
+            .get(node)
+            .expect("Could not find node info that was expected to be there");
         let internal_trace_port = node_state.internal_tracing_port;
 
         info!("Creating thread for node (tracing port: {internal_trace_port}): {node_id}",);
