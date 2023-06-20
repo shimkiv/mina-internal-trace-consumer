@@ -79,6 +79,8 @@ impl MinaServer {
 
     pub async fn authorize(&mut self) -> Result<()> {
         let auth = self.perform_auth_query().await?;
+        // TODO: store this information in the node's data
+        let _is_block_producer = auth.is_block_producer;
         self.authorization_info = Some(AuthorizationInfo {
             server_uuid: auth.server_uuid,
             signer_sequence_number: auth.signer_sequence_number.parse()?,

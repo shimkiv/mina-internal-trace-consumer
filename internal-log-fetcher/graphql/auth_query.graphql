@@ -1,6 +1,7 @@
 query AuthQuery {
     auth {
         serverUuid
-        signerSequenceNumber
+        signerSequenceNumber,
+        isBlockProducer
     }
 }

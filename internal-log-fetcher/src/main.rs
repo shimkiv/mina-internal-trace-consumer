@@ -54,6 +54,7 @@ enum Target {
 
 struct NodeInfo {
     internal_tracing_port: u16,
+    is_block_producer: Arc<std::sync::atomic::AtomicBool>,
     active: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -145,6 +146,7 @@ impl Manager {
         for node in new_nodes {
             let node_info = NodeInfo {
                 internal_tracing_port: self.next_internal_tracing_port,
+                is_block_producer: Arc::new(AtomicBool::new(false)),
                 active: Arc::new(AtomicBool::new(true)),
             };
             info!(
