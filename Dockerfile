@@ -11,7 +11,7 @@ ARG BUILD_IMAGE_VERSION=alpine-3.17-ocaml-4.14
 ## Trace consumer program (OCaml)
 FROM ${BUILD_IMAGE}:${BUILD_IMAGE_VERSION} AS builder
 
-RUN sudo apk add linux-headers
+RUN sudo apk add linux-headers sqlite sqlite-dev
 COPY --chown=opam opam.export .
 RUN opam switch import --unlock-base opam.export
 
@@ -39,7 +39,7 @@ RUN env RUSTFLAGS="-C target-feature=-crt-static" cargo build --release
 ## Final image
 FROM ${BASE_IMAGE}:${BASE_IMAGE_VERSION} AS app
 
-RUN apk add --no-cache libgcc libstdc++ openssl
+RUN apk add --no-cache libgcc libstdc++ openssl sqlite-libs
 
 COPY ./entrypoint.sh /entrypoint.sh
 COPY --from=rust-builder /app/target/release/internal-log-fetcher /internal_log_fetcher
