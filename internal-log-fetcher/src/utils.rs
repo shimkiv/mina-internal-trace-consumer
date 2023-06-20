@@ -18,7 +18,7 @@ where
         let file = OpenOptions::new()
             .create(true)
             .write(true)
-            .append(true)
+            .truncate(true)
             .open(path)?;
         Ok(file_opt.insert(file))
     }

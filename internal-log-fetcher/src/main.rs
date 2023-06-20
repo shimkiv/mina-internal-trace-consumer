@@ -7,7 +7,7 @@ use rpc::handlers::NodeDescription;
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
-    sync::{Arc, atomic::AtomicBool},
+    sync::{atomic::AtomicBool, Arc},
 };
 use structopt::StructOpt;
 use tokio::{sync::RwLock, time};
@@ -135,9 +135,14 @@ impl Manager {
         let uptime_nodes = HashSet::from_iter(current_uptime_nodes.iter());
         let known_nodes = HashSet::from_iter(self.nodes.keys().cloned());
         let new_nodes = current_uptime_nodes.difference(&known_nodes);
-        let (current_active_nodes, current_inactive_nodes): (HashSet<_>, HashSet<_>) = known_nodes
-            .iter()
-            .partition(|s| self.nodes.get(s).unwrap().active.load(std::sync::atomic::Ordering::Acquire));
+        let (current_active_nodes, current_inactive_nodes): (HashSet<_>, HashSet<_>) =
+            known_nodes.iter().partition(|s| {
+                self.nodes
+                    .get(s)
+                    .unwrap()
+                    .active
+                    .load(std::sync::atomic::Ordering::Acquire)
+            });
         let nodes_to_reactivate = current_inactive_nodes.intersection(&uptime_nodes);
         let nodes_to_deactivate = current_active_nodes.difference(&uptime_nodes);
 
@@ -171,7 +176,9 @@ impl Manager {
                     node.construct_directory_name(),
                     node_state.internal_tracing_port
                 );
-                node_state.active.store(true, std::sync::atomic::Ordering::Relaxed);
+                node_state
+                    .active
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
                 activated_nodes.push(NodeDescription::from((*node, &*node_state)));
             }
             if let Err(error) = self.spawn_node(node) {
@@ -187,7 +194,9 @@ impl Manager {
                     node.construct_directory_name(),
                     node_state.internal_tracing_port
                 );
-                node_state.active.store(false, std::sync::atomic::Ordering::Relaxed);
+                node_state
+                    .active
+                    .store(false, std::sync::atomic::Ordering::Relaxed);
                 deactivated_nodes.push(NodeDescription::from((*node, &*node_state)));
             }
             // TODO: shutdown loop (send message to stop?)
@@ -211,6 +220,7 @@ impl Manager {
             .output_dir_path
             .join(node.construct_directory_name());
         let main_trace_file_path = output_dir_path.join("internal-trace.jsonl");
+        let db_path = output_dir_path.join("traces.db");
 
         if !output_dir_path.exists() {
             std::fs::create_dir_all(&output_dir_path)?
@@ -242,6 +252,7 @@ impl Manager {
             let mut consumer = TraceConsumer::new(
                 consumer_executable_path,
                 main_trace_file_path,
+                db_path,
                 internal_trace_port,
             );
             let mut consumer_handle = consumer.run().await.unwrap();

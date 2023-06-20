@@ -8,6 +8,7 @@ use tokio::process::Command;
 pub struct TraceConsumer {
     consumer_executable_path: PathBuf,
     main_trace_file_path: PathBuf,
+    db_path: PathBuf,
     graphql_port: u16,
     // TODO: process handle here?
 }
@@ -16,11 +17,13 @@ impl TraceConsumer {
     pub fn new(
         consumer_executable_path: PathBuf,
         main_trace_file_path: PathBuf,
+        db_path: PathBuf,
         graphql_port: u16,
     ) -> Self {
         Self {
             consumer_executable_path,
             main_trace_file_path,
+            db_path,
             graphql_port,
         }
     }
@@ -30,6 +33,8 @@ impl TraceConsumer {
             .arg("serve")
             .arg("--trace-file")
             .arg(&self.main_trace_file_path)
+            .arg("--db-path")
+            .arg(&self.db_path)
             .arg("--port")
             .arg(format!("{}", self.graphql_port))
             .stdout(std::process::Stdio::null()) // TODO: log to some file instead
