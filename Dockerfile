@@ -1,7 +1,10 @@
-ARG BASE_IMAGE=alpine
-ARG BASE_IMAGE_VERSION=3.17
+#ARG BASE_IMAGE=alpine
+#ARG BASE_IMAGE_VERSION=3.17
+ARG BASE_IMAGE=debian
+ARG BASE_IMAGE_VERSION=bookworm
 ARG BUILD_IMAGE=ocaml/opam
-ARG BUILD_IMAGE_VERSION=alpine-3.17-ocaml-4.14
+#ARG BUILD_IMAGE_VERSION=alpine-3.17-ocaml-4.14
+ARG BUILD_IMAGE_VERSION=debian-12-ocaml-4.14
 ## The above default works if the built machine doesn't change and keeps layers cached.
 ## Alternatively, `build.Dockerfile` can be used to prepare a builder image to use as a base.
 ## docker build . -t internal-trace-consumer:build --target builder
@@ -11,7 +14,8 @@ ARG BUILD_IMAGE_VERSION=alpine-3.17-ocaml-4.14
 ## Trace consumer program (OCaml)
 FROM ${BUILD_IMAGE}:${BUILD_IMAGE_VERSION} AS builder
 
-RUN sudo apk add linux-headers sqlite sqlite-dev
+#RUN sudo apk add linux-headers sqlite sqlite-dev
+RUN sudo apt-get update && sudo apt-get install -y pkg-config sqlite3 libsqlite3-dev
 COPY --chown=opam opam.export .
 RUN opam switch import --unlock-base opam.export
 
@@ -22,11 +26,12 @@ COPY --chown=opam:opam . /src/code
 RUN cd /src/code && opam exec -- dune build src/internal_trace_consumer.exe
 
 ## Remote trace fetcher program (Rust)
-FROM rust:1.69.0-alpine${BASE_IMAGE_VERSION} AS rust-builder
+FROM rust:1.69.0-${BASE_IMAGE_VERSION} AS rust-builder
 
 WORKDIR /app
 
-RUN apk add --no-cache libgcc libstdc++ openssl openssl-dev musl-dev
+#RUN apk add --no-cache libgcc libstdc++ openssl openssl-dev musl-dev
+RUN apt-get update && apt-get install -y pkg-config libssl-dev
 
 COPY ./internal-log-fetcher/Cargo.toml ./internal-log-fetcher/Cargo.lock ./
 COPY ./internal-log-fetcher/src ./src
@@ -39,7 +44,8 @@ RUN env RUSTFLAGS="-C target-feature=-crt-static" cargo build --release
 ## Final image
 FROM ${BASE_IMAGE}:${BASE_IMAGE_VERSION} AS app
 
-RUN apk add --no-cache libgcc libstdc++ openssl sqlite-libs
+#RUN apk add --no-cache libgcc libstdc++ openssl sqlite-libs
+RUN apt-get update && apt-get install -y libssl3 libsqlite3-0 ca-certificates
 
 COPY ./entrypoint.sh /entrypoint.sh
 COPY --from=rust-builder /app/target/release/internal-log-fetcher /internal_log_fetcher
