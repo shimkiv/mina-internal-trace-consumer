@@ -219,9 +219,7 @@ impl Manager {
         let output_dir_path = self
             .opts
             .output_dir_path
-            .join(&node_dir_name)
-            .canonicalize()
-            .context(format!("Computing output dir path for {node_dir_name}"))?;
+            .join(node_dir_name);
         let main_trace_file_path = output_dir_path.join("internal-trace.jsonl");
         let db_path = output_dir_path.join("traces.db");
 
@@ -303,7 +301,11 @@ async fn main() -> Result<()> {
 
     tracing::subscriber::set_global_default(subscriber)?;
 
-    let opts = Opts::from_args();
+    let mut opts = Opts::from_args();
+
+    opts.output_dir_path = opts.output_dir_path.canonicalize().unwrap_or(opts.output_dir_path);
+    info!("Output dir path: {}", opts.output_dir_path.display());
+
     let shared_manager = SharedManager(Arc::new(RwLock::new(Manager::try_new(opts)?)));
 
     let rest_port = 4000;
