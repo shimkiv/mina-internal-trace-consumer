@@ -146,8 +146,13 @@ impl Manager {
         let nodes_to_reactivate = current_inactive_nodes.intersection(&uptime_nodes);
         let nodes_to_deactivate = current_active_nodes.difference(&uptime_nodes);
 
-        let mut activated_nodes = Vec::new();
-        let mut deactivated_nodes = Vec::new();
+        info!(
+            "State before update: known={} active={} inactive={} discovered={}",
+            known_nodes.len(),
+            current_active_nodes.len(),
+            current_inactive_nodes.len(),
+            uptime_nodes.len()
+        );
 
         for node in new_nodes {
             let node_info = NodeInfo {
@@ -160,7 +165,6 @@ impl Manager {
                 node.construct_directory_name(),
                 node_info.internal_tracing_port
             );
-            activated_nodes.push(NodeDescription::from((node, &node_info)));
             self.nodes.insert(node.clone(), node_info);
             self.next_internal_tracing_port += 1;
             if let Err(error) = self.spawn_node(node) {
@@ -179,7 +183,6 @@ impl Manager {
                 node_state
                     .active
                     .store(true, std::sync::atomic::Ordering::Relaxed);
-                activated_nodes.push(NodeDescription::from((*node, &*node_state)));
             }
             if let Err(error) = self.spawn_node(node) {
                 error!("Error when spawning node {:?}: {}", node, error);
@@ -197,18 +200,26 @@ impl Manager {
                 node_state
                     .active
                     .store(false, std::sync::atomic::Ordering::Relaxed);
-                deactivated_nodes.push(NodeDescription::from((*node, &*node_state)));
             }
             // TODO: shutdown loop (send message to stop?)
             // but if this really happens, the loop will fail by itself anyway
             // alternatively, a timeout can be added to the listening of the spawned loop and the active var checked
         }
 
-        let mut an = self.available_nodes.0.write().await;
-        for nd in deactivated_nodes {
-            an.remove(&nd);
-        }
-        an.extend(activated_nodes.into_iter());
+        // Update the list of available nodes to contain only the currently active nodes
+        let mut available_nodes = self.available_nodes.0.write().await;
+        available_nodes.clear();
+        available_nodes.extend(known_nodes.iter().filter_map(|s| {
+            if let Some(node_state) = self.nodes.get(s) {
+                if node_state.active.load(std::sync::atomic::Ordering::Acquire) {
+                    Some(NodeDescription::from((s, node_state)))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }));
 
         Ok(())
     }
@@ -216,10 +227,7 @@ impl Manager {
     fn spawn_node(&mut self, node: &NodeIdentity) -> Result<()> {
         debug!("Handling Node: {:?}", node);
         let node_dir_name = node.construct_directory_name();
-        let output_dir_path = self
-            .opts
-            .output_dir_path
-            .join(node_dir_name);
+        let output_dir_path = self.opts.output_dir_path.join(node_dir_name);
         let main_trace_file_path = output_dir_path.join("internal-trace.jsonl");
         let db_path = output_dir_path.join("traces.db");
 
@@ -303,7 +311,10 @@ async fn main() -> Result<()> {
 
     let mut opts = Opts::from_args();
 
-    opts.output_dir_path = opts.output_dir_path.canonicalize().unwrap_or(opts.output_dir_path);
+    opts.output_dir_path = opts
+        .output_dir_path
+        .canonicalize()
+        .unwrap_or(opts.output_dir_path);
     info!("Output dir path: {}", opts.output_dir_path.display());
 
     let shared_manager = SharedManager(Arc::new(RwLock::new(Manager::try_new(opts)?)));
