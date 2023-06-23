@@ -228,7 +228,7 @@ impl Manager {
         debug!("Handling Node: {:?}", node);
         let node_dir_name = node.construct_directory_name();
         let output_dir_path = self.opts.output_dir_path.join(node_dir_name);
-        let main_trace_file_path = output_dir_path.join("internal-trace.jsonl");
+        let main_trace_file_path = output_dir_path.join(trace_consumer::internal_trace_file::MAIN);
         let db_path = output_dir_path.join("traces.db");
 
         if !output_dir_path.exists() {
@@ -246,6 +246,13 @@ impl Manager {
         let internal_trace_port = node_state.internal_tracing_port;
 
         info!("Creating thread for node (tracing port: {internal_trace_port}): {node_id}",);
+
+        // cleanup old trace files before launching the consumer
+        // to ensure that it doesn't load old data before this new run
+        // truncates the files
+        for name in trace_consumer::internal_trace_file::ALL {
+            std::fs::remove_file(output_dir_path.join(name)).ok();
+        }
 
         let config = mina_server::MinaServerConfig {
             secret_key_base64: self.secret_key_base64.clone(),

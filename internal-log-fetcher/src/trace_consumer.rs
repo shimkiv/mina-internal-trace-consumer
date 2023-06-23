@@ -5,6 +5,14 @@ use std::path::PathBuf;
 
 use tokio::process::Command;
 
+pub mod internal_trace_file {
+    pub const MAIN: &str = "internal-trace.jsonl";
+    pub const VERIFIER: &str = "verifier-internal-trace.jsonl";
+    pub const PROVER: &str = "prover-internal-trace.jsonl";
+
+    pub const ALL: [&str; 3] = [MAIN, VERIFIER, PROVER];
+}
+
 pub struct TraceConsumer {
     consumer_executable_path: PathBuf,
     main_trace_file_path: PathBuf,

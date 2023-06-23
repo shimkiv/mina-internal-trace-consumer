@@ -249,15 +249,18 @@ impl MinaServer {
         let file = match process.as_deref() {
             None => utils::maybe_open(
                 &mut self.main_trace_file,
-                self.output_dir_path.join("internal-trace.jsonl"),
+                self.output_dir_path
+                    .join(crate::trace_consumer::internal_trace_file::MAIN),
             )?,
             Some("prover") => utils::maybe_open(
                 &mut self.prover_trace_file,
-                self.output_dir_path.join("prover-internal-trace.jsonl"),
+                self.output_dir_path
+                    .join(crate::trace_consumer::internal_trace_file::PROVER),
             )?,
             Some("verifier") => utils::maybe_open(
                 &mut self.verifier_trace_file,
-                self.output_dir_path.join("verifier-internal-trace.jsonl"),
+                self.output_dir_path
+                    .join(crate::trace_consumer::internal_trace_file::VERIFIER),
             )?,
             Some(process) => {
                 eprintln!("[WARN] got unexpected process {process}");
