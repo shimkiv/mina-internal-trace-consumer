@@ -29,7 +29,37 @@ type target_trace = [ `Main | `Other ] [@@deriving equal]
 
 let block_source_to_yojson = Util.flatten_yojson_variant block_source_to_yojson
 
+let block_source_to_string bs =
+  match block_source_to_yojson bs with `String s -> s | _ -> assert false
+
+let block_source_from_string = function
+  | "External" ->
+      `External
+  | "Internal" ->
+      `Internal
+  | "Catchup" ->
+      `Catchup
+  | "Reconstruct" ->
+      `Reconstruct
+  | "Unknown" ->
+      `Unknown
+  | _other ->
+      `Unknown (* TODO: print warning*)
+
 let status_to_yojson = Util.flatten_yojson_variant status_to_yojson
+
+let status_to_string s =
+  match status_to_yojson s with `String s -> s | _ -> assert false
+
+let status_from_string = function
+  | "Pending" ->
+      `Pending
+  | "Failure" ->
+      `Failure
+  | "Success" ->
+      `Success
+  | _ ->
+      `Pending (* TODO: warning *)
 
 type t =
   { source : block_source

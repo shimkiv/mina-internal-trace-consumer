@@ -11,6 +11,7 @@
   ;; opam libraries
   base
   base.base_internalhash_types
+  result
   core
   core_kernel
   core_unix
@@ -28,7 +29,12 @@
   cohttp
   graphql-cohttp
   cohttp-async
-  uri)
+  uri
+  sqlite3
+  caqti
+  caqti-async
+  caqti-driver-sqlite3
+  )
  (preprocess
   (pps ppx_jane ppx_deriving_yojson))
  (modes native))

@@ -1,7 +1,7 @@
 open Core
 
 module Make (Inputs : sig
-  type identity [@@deriving to_yojson]
+  type identity [@@deriving yojson]
 end) =
 struct
   open Inputs
@@ -12,7 +12,7 @@ struct
     ; mutable max_time : float [@key "maxTime"]
     ; mutable total_time : float [@key "totalTime"]
     }
-  [@@deriving to_yojson]
+  [@@deriving yojson]
 
   type t =
     { identity : identity
@@ -28,7 +28,7 @@ struct
     ; ten_to_one_hundred_s : range_info [@key "tenToOneHundredS"]
     ; one_hundred_s : range_info [@key "oneHundredS"]
     }
-  [@@deriving to_yojson]
+  [@@deriving yojson]
 
   type listing = t list [@@deriving to_yojson]
 

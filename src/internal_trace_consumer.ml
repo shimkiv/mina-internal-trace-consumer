@@ -4,7 +4,22 @@ module Block_tracing = Block_tracing
 
 let current_block = ref "0"
 
-(* TODO: cleanup these from time to time *)
+let show_result_error = function
+  | Ok _ ->
+      ()
+  | Error error ->
+      printf "SQL ERROR: %s\n%!" (Caqti_error.show error)
+
+let current_trace_id ?(source = `Unknown) () =
+  match%map
+    Persistent_registry.get_or_add_block_trace ~source !current_block
+  with
+  | Error err ->
+      eprintf "[ERROR] could not get_or_add_trace %s: %s" !current_block
+        (Caqti_error.show err) ;
+      0
+  | Ok id ->
+      id
 
 (* These tables keep track of the context switches for blocks in the main trace when
    making calls to the prover or verifier. The mapping is from:
@@ -48,130 +63,117 @@ end
 let push_pending_entry table call_id (entry : Pending.t) =
   Int.Table.update table call_id ~f:(fun entries ->
       let entries = Option.value ~default:[] entries in
-      entry :: entries )
+      entry :: entries ) ;
+  Deferred.unit
 
 let find_nearest_block ~context_blocks timestamp =
   List.find_map context_blocks ~f:(fun (block, switch_timestamp) ->
       if Float.(timestamp >= switch_timestamp) then Some block else None )
 
-let push_kimchi_checkpoints_from_metadata ~block_id parent_entry
-    (metadata : Yojson.Safe.t) =
-  try
-    let checkpoints =
-      let open Yojson.Safe.Util in
-      metadata |> member "traces" |> to_string |> String.split_lines
-      |> List.map ~f:Yojson.Safe.from_string
-    in
-    let checkpoints =
-      List.map checkpoints ~f:(fun json ->
-          match json with
-          | `List [ `String checkpoint; `Float timestamp ] ->
-              `Checkpoint (checkpoint, timestamp)
-          | `Assoc metadata ->
-              `Metadata metadata
-          | _ ->
-              failwith "got malformed kimchi checkpoints" )
-    in
-    let current_entry = ref parent_entry in
-    List.iter checkpoints ~f:(function
-      | `Checkpoint (checkpoint, timestamp) ->
-          let checkpoint = "Kimchi_" ^ checkpoint in
-          let prev_checkpoint = !current_entry.Block_trace.Entry.checkpoint in
-          current_entry :=
-            Block_tracing.record ~block_id ~checkpoint ~timestamp
-              ~target_trace:`Main ~order:(`Chronological_after prev_checkpoint)
-              ()
-      | `Metadata metadata ->
-          !current_entry.metadata <- `Assoc metadata )
-  with exn ->
-    eprintf "[WARN] failed to integrate kimchi checkpoints: %s\n%!"
-      (Exn.to_string exn) ;
-    eprintf "BACKTRACE:\n%s\n%!" (Printexc.get_backtrace ())
-
-let add_pending_entries_to_block_trace ~block_id ~parent_checkpoint
-    pending_entries =
-  (* these must be processed at the end *)
-  let pending_kimchi_entries = ref [] in
-  let rec loop ~previous_checkpoint entries current_entry =
-    match entries with
+let add_pending_entries_to_block_trace ~entries_source ~block_trace_id
+    ~parent_checkpoint ~call_id pending_entries =
+  let rec loop = function
     | Pending.Checkpoint (checkpoint, timestamp) :: entries ->
-        let current_entry =
-          Block_tracing.record ~block_id ~checkpoint ~timestamp
-            ~target_trace:`Main
-            ~order:(`Chronological_after previous_checkpoint) ()
+        let%bind result =
+          Persistent_registry.push_checkpoint block_trace_id ~is_main:true
+            ~call_id ~source:entries_source ~name:checkpoint ~timestamp ()
         in
-        loop ~previous_checkpoint:checkpoint entries current_entry
+        show_result_error result ; loop entries
     | Pending.Control ("metadata", data) :: entries ->
-        if
-          String.equal "Backend_tick_proof_create_async"
-            current_entry.checkpoint
-          || String.equal "Backend_tock_proof_create_async"
-               current_entry.checkpoint
-        then
-          pending_kimchi_entries :=
-            (current_entry, data) :: !pending_kimchi_entries
-        else
-          current_entry.metadata <-
-            Yojson.Safe.Util.combine current_entry.metadata data ;
-        loop ~previous_checkpoint entries current_entry
+        let%bind result =
+          Persistent_registry.push_control block_trace_id ~is_main:true ~call_id
+            ~source:entries_source ~name:"metadata" ~metadata:data ()
+        in
+        show_result_error result ; loop entries
     | Pending.Control (_, _) :: entries ->
         (* printf "Ignoring control %s\n%!" other ; *)
-        loop ~previous_checkpoint entries current_entry
+        loop entries
     | [] ->
-        List.iter !pending_kimchi_entries ~f:(fun (parent_entry, data) ->
-            push_kimchi_checkpoints_from_metadata ~block_id parent_entry data )
+        return ()
   in
   let timestamp = Pending.timestamp (List.last_exn pending_entries) in
-  match
-    Block_tracing.nearest_trace ~prev_checkpoint:parent_checkpoint ~timestamp
-      block_id
+  match%bind
+    Persistent_registry.nearest_trace ~prev_checkpoint:parent_checkpoint
+      ~timestamp block_trace_id
   with
-  | `Main ->
-      loop ~previous_checkpoint:parent_checkpoint pending_entries
-        (Block_trace.Entry.make ~timestamp:0.0 "")
-  | `Other ->
+  | Ok `Main ->
+      loop pending_entries
+  | Ok `Other ->
       (* TODO: loop but with target = `Other? *)
-      ()
+      return ()
+  | Error err ->
+      eprintf "[WARN] failure when trying to find nearest checkpoint: %s\n%!"
+        (Caqti_error.show err) ;
+      return ()
+
+let handle_pending_entries ~call_id ~entries_source ~context_blocks
+    ~last_pending_entry ~pending_entries =
+  let open Pending in
+  match pending_entries with
+  | Checkpoint (first_checkpoint, first_timestamp) :: _ -> (
+      match
+        ( Pending.parent_and_finish_checkpoints first_checkpoint
+        , last_pending_entry )
+      with
+      | ( Some (parent_checkpoint, end_checkpoint)
+        , Some (Checkpoint (last_checkpoint, _)) )
+        when String.equal end_checkpoint last_checkpoint -> (
+          match String.Table.find context_blocks parent_checkpoint with
+          | Some context_blocks -> (
+              match find_nearest_block ~context_blocks first_timestamp with
+              | Some block_id -> (
+                  match Persistent_registry.block_trace_id block_id with
+                  | None ->
+                      eprintf "[WARN] could not find trace id for %s\n%!"
+                        block_id ;
+                      return false
+                  | Some block_trace_id ->
+                      let%map () =
+                        add_pending_entries_to_block_trace ~entries_source
+                          ~block_trace_id ~parent_checkpoint ~call_id
+                          pending_entries
+                      in
+                      false )
+              | None ->
+                  (* Could not find a block to attach although data is ready, drop *)
+                  return false )
+          | None ->
+              (* Could not find related block because data is not ready yet,
+                 wait and try again later *)
+              return true )
+      | _ ->
+          (* Still not complete, wait and try again later *)
+          return true )
+  | Control (name, _) :: _ ->
+      eprintf
+        "[WARN] unexpected non-checkpoint entry '%s' found as first element in \
+         pending trace\n\
+         %!"
+        name ;
+      return false
+  | _ ->
+      eprintf "[WARN] empty list in pending trace\n%!" ;
+      return false
 
 (* Pending, complete verifier/prover traces are matched to a block trace by their timestamp
    and expected parent call (a checkpoint in the main trace). Once added they are removed
    from the pending table. *)
-let process_pending_entries ~context_blocks
+let process_pending_entries ~entries_source ~context_blocks
     (pending_checkpoints : Pending.registry) =
-  Int.Table.filter_inplace pending_checkpoints ~f:(fun rev_pending_entries ->
+  let open Deferred.Let_syntax in
+  let keys = Int.Table.keys pending_checkpoints in
+  Deferred.List.iter keys ~f:(fun call_id ->
+      let rev_pending_entries =
+        Int.Table.find_exn pending_checkpoints call_id
+      in
       let pending_entries = List.rev rev_pending_entries in
-      match pending_entries with
-      | Checkpoint (first_checkpoint, first_timestamp) :: _ -> (
-          match
-            ( Pending.parent_and_finish_checkpoints first_checkpoint
-            , List.hd rev_pending_entries )
-          with
-          | ( Some (parent_checkpoint, end_checkpoint)
-            , Some (Checkpoint (last_checkpoint, _)) )
-            when String.equal end_checkpoint last_checkpoint -> (
-              match String.Table.find context_blocks parent_checkpoint with
-              | Some context_blocks -> (
-                  match find_nearest_block ~context_blocks first_timestamp with
-                  | Some block_id ->
-                      add_pending_entries_to_block_trace ~block_id
-                        ~parent_checkpoint pending_entries ;
-                      false
-                  | None ->
-                      (* Could not find a block to attach although data is ready, drop *)
-                      false )
-              | None ->
-                  (* Could not find related block because data is not ready yet,
-                     wait and try again later *)
-                  true )
-          | _ ->
-              (* Still not complete, wait and try again later *)
-              true )
-      | _ ->
-          eprintf
-            "[WARN] unexpected non-checkpoint entry found as first element in \
-             pending trace\n\
-             %!" ;
-          false )
+      let%map should_keep =
+        handle_pending_entries ~entries_source ~context_blocks
+          ~last_pending_entry:(List.hd rev_pending_entries)
+          ~call_id ~pending_entries
+      in
+      if not should_keep then Int.Table.remove pending_checkpoints call_id ;
+      () )
 
 module Main_handler = struct
   module Block_call_tag_key = struct
@@ -227,14 +229,33 @@ module Main_handler = struct
     let action = checkpoint_recording_action () in
     match action with
     | `Skip ->
-        () (* TODO: this branch is currently unused, see FIXME above *)
+        (* TODO: this branch is currently unused, see FIXME above *)
+        Deferred.unit
     | (`Keep | `Other) as action ->
         let target_trace =
           match action with `Keep -> `Main | `Other -> `Other
         in
-        let _entry =
-          Block_tracing.record ~block_id:!current_block ~target_trace
-            ~checkpoint ~timestamp ()
+        let source = Block_tracing.compute_source checkpoint in
+        let%bind trace_id = current_trace_id ~source () in
+        let%map () =
+          match target_trace with
+          | `Main ->
+              let status = Block_tracing.compute_status checkpoint in
+              let%bind result =
+                Persistent_registry.handle_status_change trace_id status
+              in
+              show_result_error result ;
+              let%bind result =
+                Persistent_registry.push_checkpoint trace_id ~is_main:true
+                  ~source:`Main ~name:checkpoint ~timestamp ()
+              in
+              show_result_error result ; Deferred.unit
+          | `Other ->
+              let%bind result =
+                Persistent_registry.push_checkpoint trace_id ~is_main:false
+                  ~source:`Main ~name:checkpoint ~timestamp ()
+              in
+              show_result_error result ; Deferred.unit
         in
         handle_verifier_and_prover_call_checkpoints checkpoint timestamp ;
         ()
@@ -242,7 +263,8 @@ module Main_handler = struct
   let process_control ~other control data =
     match control with
     | "current_block" ->
-        current_block := Yojson.Safe.Util.to_string data
+        current_block := Yojson.Safe.Util.to_string data ;
+        Deferred.unit
     | "current_call_id" -> (
         (* TODO: to avoid constant rehashing a flag can be set here about where
            to target the next checkpoints *)
@@ -250,7 +272,8 @@ module Main_handler = struct
         match List.Assoc.find ~equal:String.equal other "current_call_tag" with
         | None | Some (`String "" | `Null) ->
             (* If it is not present, must reset it *)
-            current_call_tag := ""
+            current_call_tag := "" ;
+            Deferred.unit
         | Some (`String tag) ->
             current_call_tag := tag ;
             let _call_id =
@@ -258,26 +281,45 @@ module Main_handler = struct
                 (!current_block, !current_call_tag) ~default:(fun () ->
                   !current_call_id )
             in
-            ()
+            Deferred.unit
         | Some other ->
             eprintf "Got unexpected value for `current_call_tag`: %s\n%!"
-              (Yojson.Safe.to_string other) )
+              (Yojson.Safe.to_string other) ;
+            Deferred.unit )
     | "metadata" ->
-        Block_tracing.push_metadata ~block_id:!current_block
-          (Yojson.Safe.Util.to_assoc data)
+        let%bind trace_id = current_trace_id () in
+        let%map result =
+          Persistent_registry.push_control trace_id ~source:`Main ~is_main:true
+            ~name:"metadata" ~metadata:data ()
+        in
+        show_result_error result ; ()
     | "block_metadata" ->
-        Block_tracing.push_global_metadata ~block_id:!current_block
-          (Yojson.Safe.Util.to_assoc data)
+        let%bind trace_id = current_trace_id () in
+        let%bind result =
+          Persistent_registry.push_control trace_id ~source:`Main ~is_main:true
+            ~name:"block_metadata" ~metadata:data ()
+        in
+        show_result_error result ;
+        let%map result =
+          Persistent_registry.push_block_metadata trace_id
+            ~metadata:(Yojson.Safe.Util.to_assoc data)
+        in
+        show_result_error result ; ()
     | "produced_block_state_hash" ->
-        Block_tracing.set_produced_block_state_hash ~block_id:!current_block
-          (Yojson.Safe.Util.to_string data)
+        let state_hash = Yojson.Safe.Util.to_string data in
+        let%bind trace_id = current_trace_id () in
+        let%map result =
+          Persistent_registry.set_produced_block_state_hash trace_id state_hash
+        in
+        show_result_error result ; ()
     | "internal_tracing_enabled" ->
-        ()
+        Deferred.unit
     | "mina_node_metadata" ->
         (* TODO: should clear all old data here? *)
-        ()
+        Deferred.unit
     | another ->
-        eprintf "[WARN] unprocessed control: %s\n%!" another
+        eprintf "[WARN] unprocessed control: %s\n%!" another ;
+        Deferred.unit
 
   (* TODO: reset all traces too? *)
   let file_changed () =
@@ -294,10 +336,14 @@ module Main_handler = struct
       let before_verifier_entries = Int.Table.length Pending.verifier_entries in
       let before_time = Unix.gettimeofday () in*)
     (* TODO: these are not integrated into the checkpoints histogram *)
-    process_pending_entries ~context_blocks:prover_calls_context_block
-      Pending.prover_entries ;
-    process_pending_entries ~context_blocks:verifier_calls_context_block
-      Pending.verifier_entries ;
+    let%bind () =
+      process_pending_entries ~entries_source:`Prover
+        ~context_blocks:prover_calls_context_block Pending.prover_entries
+    in
+    let%bind () =
+      process_pending_entries ~entries_source:`Verifier
+        ~context_blocks:verifier_calls_context_block Pending.verifier_entries
+    in
     (*let after_prover_entries = Int.Table.length Pending.prover_entries in
       let after_verifier_entries = Int.Table.length Pending.verifier_entries in
       let after_time = Unix.gettimeofday () in
@@ -305,7 +351,8 @@ module Main_handler = struct
         before_prover_entries after_prover_entries before_verifier_entries
         after_verifier_entries
         (after_time -. before_time) ;*)
-    Ivar.fill_if_empty main_trace_synced ()
+    Ivar.fill_if_empty main_trace_synced () ;
+    return ()
 end
 
 module Prover_handler = struct
@@ -316,15 +363,19 @@ module Prover_handler = struct
       (Pending.Checkpoint (checkpoint, timestamp))
 
   let process_control ~other:_ tag data =
-    if String.equal tag "current_call_id" then
-      current_call_id := Yojson.Safe.Util.to_int data
-    else
-      push_pending_entry Pending.prover_entries !current_call_id
-        (Pending.Control (tag, data))
+    match tag with
+    | "current_call_id" ->
+        current_call_id := Yojson.Safe.Util.to_int data ;
+        Deferred.unit
+    | "internal_tracing_enabled" | "mina_node_metadata" ->
+        Deferred.unit
+    | tag ->
+        push_pending_entry Pending.prover_entries !current_call_id
+          (Pending.Control (tag, data))
 
   let file_changed () = Int.Table.clear Pending.prover_entries
 
-  let eof_reached () = () (* Nothing to do *)
+  let eof_reached () = Deferred.unit (* Nothing to do *)
 end
 
 module Verifier_handler = struct
@@ -335,15 +386,19 @@ module Verifier_handler = struct
       (Pending.Checkpoint (checkpoint, timestamp))
 
   let process_control ~other:_ tag data =
-    if String.equal tag "current_call_id" then
-      current_call_id := Yojson.Safe.Util.to_int data
-    else
-      push_pending_entry Pending.verifier_entries !current_call_id
-        (Pending.Control (tag, data))
+    match tag with
+    | "current_call_id" ->
+        current_call_id := Yojson.Safe.Util.to_int data ;
+        Deferred.unit
+    | "internal_tracing_enabled" | "mina_node_metadata" ->
+        Deferred.unit
+    | tag ->
+        push_pending_entry Pending.verifier_entries !current_call_id
+          (Pending.Control (tag, data))
 
   let file_changed () = Int.Table.clear Pending.verifier_entries
 
-  let eof_reached () = () (* Nothing to do *)
+  let eof_reached () = Deferred.unit (* Nothing to do *)
 end
 
 module Main_trace_processor = Trace_file_processor.Make (Main_handler)
@@ -354,6 +409,17 @@ let add_filename_prefix original_path ~prefix =
   let open Filename in
   concat (dirname original_path) (prefix ^ basename original_path)
 
+let with_database dburi f =
+  let open Deferred.Let_syntax in
+  let%map result = Caqti_async.with_connection dburi f in
+  match result with
+  | Ok result ->
+      result
+  | Error error ->
+      Format.eprintf "[ERROR] Failure when opening database: %a" Caqti_error.pp
+        error ;
+      Core.exit 1
+
 let serve =
   Command.async ~summary:"Internal trace processor with GraphQL server"
     (let%map_open.Command port =
@@ -363,6 +429,9 @@ let serve =
      and main_trace_file_path =
        flag "--trace-file" ~aliases:[ "trace-file" ] (required string)
          ~doc:"Path to main internal trace file"
+     and db_path =
+       flag "--db-path" ~aliases:[ "db-path" ] (required string)
+         ~doc:"Persisted traces db"
      in
      let prover_trace_file_path =
        add_filename_prefix main_trace_file_path ~prefix:"prover-"
@@ -371,6 +440,13 @@ let serve =
        add_filename_prefix main_trace_file_path ~prefix:"verifier-"
      in
      fun () ->
+       let dburi = "sqlite3://" ^ db_path in
+       let dburi = Uri.of_string dburi in
+       with_database dburi
+       @@ fun conn ->
+       let%bind result = Store.initialize_database conn in
+       show_result_error result ;
+       Persistent_registry.set conn ;
        let insecure_rest_server = true in
        printf "Starting server on port %d...\n%!" port ;
        let%bind _ =
@@ -405,10 +481,10 @@ let serve =
          in
          Verifier_trace_processor.process_file verifier_trace_file_path
        in
+       printf "Done\n%!" ; Deferred.return (Ok ()) )
 
-       printf "Done\n%!" ; Deferred.unit )
-
-let commands = [ ("serve", serve) ]
+let commands =
+  [ ("serve", serve); ("test-storage", Store.Testing.test_storage) ]
 
 let () =
   Async.Signal.handle [ Async.Signal.term; Async.Signal.int ] ~f:(fun _ ->

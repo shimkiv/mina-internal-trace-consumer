@@ -4,6 +4,12 @@ module Graphql_cohttp_async =
   Graphql_internal.Make (Graphql_async.Schema) (Cohttp_async.Io)
     (Cohttp_async.Body)
 
+let show_result_error = function
+  | Ok _ ->
+      ()
+  | Error error ->
+      printf "SQL ERROR: %s\n%!" (Caqti_error.show error)
+
 module Queries = struct
   open Graphql_async
   open Schema
@@ -28,25 +34,62 @@ module Queries = struct
         ]
 
   let get_block_trace =
-    field "blockTrace" ~doc:"Block trace" ~typ:json_type
+    io_field "blockTrace" ~doc:"Block trace" ~typ:json_type
       ~args:Arg.[ arg "block_identifier" ~typ:(non_null string) ]
       ~resolve:(fun _info () block ->
-        let trace_rev = Block_tracing.Registry.find_trace block in
-        Option.map trace_rev ~f:(fun trace ->
-            trace |> Block_tracing.Trace.to_yojson |> Yojson.Safe.to_basic ) )
+        let%bind traces = Persistent_registry.get_block_traces block in
+        show_result_error traces ;
+        let traces = Result.ok traces |> Option.value ~default:[] in
+        match List.hd traces with
+        | None ->
+            return (Ok None)
+        | Some (block_trace_id, trace) ->
+            let%bind checkpoints =
+              Persistent_registry.get_block_trace_checkpoints block_trace_id
+            in
+            show_result_error checkpoints ;
+            let checkpoints =
+              Result.ok checkpoints |> Option.value ~default:[]
+            in
+            let trace =
+              Store.Persisted_block_trace.to_block_trace ~checkpoints trace
+            in
+            return
+            @@ Ok
+                 (Some
+                    ( trace |> Block_tracing.Trace.to_yojson
+                    |> Yojson.Safe.to_basic ) ) )
 
   let get_block_structured_trace =
-    field "blockStructuredTrace" ~doc:"Block structured trace" ~typ:json_type
+    io_field "blockStructuredTrace" ~doc:"Block structured trace" ~typ:json_type
       ~args:Arg.[ arg "block_identifier" ~typ:(non_null string) ]
       ~resolve:(fun _info () block ->
-        let trace_rev = Block_tracing.Registry.find_trace block in
-        Option.map trace_rev ~f:(fun trace ->
+        let%bind traces = Persistent_registry.get_block_traces block in
+        show_result_error traces ;
+        let traces = Result.ok traces |> Option.value ~default:[] in
+        match List.hd traces with
+        | None ->
+            return (Ok None)
+        | Some (block_trace_id, trace) ->
+            let%bind checkpoints =
+              Persistent_registry.get_block_trace_checkpoints block_trace_id
+            in
+            show_result_error checkpoints ;
+            let checkpoints =
+              Result.ok checkpoints |> Option.value ~default:[]
+            in
+            let trace =
+              Store.Persisted_block_trace.to_block_trace ~checkpoints trace
+            in
             let trace = Block_tracing.Structured_trace.of_flat_trace trace in
-            trace |> Block_tracing.Structured_trace.to_yojson
-            |> Yojson.Safe.to_basic ) )
+            return
+            @@ Ok
+                 (Some
+                    ( trace |> Block_tracing.Structured_trace.to_yojson
+                    |> Yojson.Safe.to_basic ) ) )
 
   let list_block_traces =
-    field "blockTraces" ~doc:"Block with traces" ~typ:(non_null json_type)
+    io_field "blockTraces" ~doc:"Block with traces" ~typ:(non_null json_type)
       ~args:
         Arg.
           [ arg "maxLength" ~doc:"The maximum number of block traces to return."
@@ -69,22 +112,33 @@ module Queries = struct
           ]
       ~resolve:(fun _info () max_length offset height global_slot chain_length
                     order ->
-        let traces =
-          Block_tracing.Registry.all_traces ?max_length ?offset ?height
+        let%bind traces =
+          Persistent_registry.get_all_block_traces ?max_length ?offset ?height
             ?global_slot ?chain_length ?order ()
         in
-        Block_tracing.Registry.traces_to_yojson traces |> Yojson.Safe.to_basic
-        )
+        show_result_error traces ;
+        let traces = Result.ok traces |> Option.value ~default:[] in
+        let traces = { Block_tracing.Registry.traces; produced_traces = [] } in
+        return
+        @@ Ok
+             ( Block_tracing.Registry.traces_to_yojson traces
+             |> Yojson.Safe.to_basic ) )
 
   let get_block_traces_distribution =
-    field "blockTracesDistribution" ~doc:"Block trace checkpoints distribution"
-      ~typ:(non_null json_type)
+    io_field "blockTracesDistribution"
+      ~doc:"Block trace checkpoints distribution" ~typ:(non_null json_type)
       ~args:Arg.([] (* TODOX: add parent checkpoint filter *))
       ~resolve:(fun _info () ->
         let open Block_tracing.Distributions in
+        let%bind all = Persistent_registry.get_distributions () in
+        show_result_error all ;
+        let all =
+          Result.ok all |> Option.value_map ~f:Hashtbl.data ~default:[]
+        in
         let compare d1 d2 = Float.compare d1.total_time d2.total_time in
-        let distributions = all () |> List.sort ~compare in
-        listing_to_yojson distributions |> Yojson.Safe.to_basic )
+        let distributions = List.sort ~compare all in
+        return @@ Ok (listing_to_yojson distributions |> Yojson.Safe.to_basic)
+        )
 
   let commands =
     [ get_block_trace
@@ -95,11 +149,11 @@ module Queries = struct
 end
 
 let add_cors_headers (headers : Cohttp.Header.t) =
-  Cohttp.Header.add_list headers [
-    ("Access-Control-Allow-Origin", "*");
-    ("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS");
-    ("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  ]
+  Cohttp.Header.add_list headers
+    [ ("Access-Control-Allow-Origin", "*")
+    ; ("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
+    ; ("Access-Control-Allow-Headers", "Content-Type, Authorization")
+    ]
 
 let respond_with_cors body status =
   let headers = Cohttp.Header.init () |> add_cors_headers in
@@ -127,29 +181,28 @@ let create_graphql_server ~bind_to_address ~schema ~server_description port =
               let headers = add_cors_headers headers in
               let response = { response with Cohttp.Response.headers } in
               return (`Response (response, body))
-          | `Expert _ as action -> return action
+          | `Expert _ as action ->
+              return action
         in
         match Cohttp.Request.meth req with
         | `OPTIONS ->
             respond_with_cors "" `OK >>| lift
-        | `GET | `POST | `PUT | `DELETE | `HEAD | `CONNECT | `TRACE | `PATCH ->
-            begin
-              match Uri.path uri with
-              | "" | "/" ->
-                  let body =
-                    "This page is intentionally left blank. The graphql endpoint can \
-                    be found at `/graphql`."
-                  in
-                  respond_with_cors body `OK >>| lift
-              | "/graphql" ->
-                  graphql_callback () req body
-                  >>= lift_with_cors_graphql
-              | _ ->
-                  respond_with_cors "Route not found" `Not_found >>| lift
-            end
+        | `GET | `POST | `PUT | `DELETE | `HEAD | `CONNECT | `TRACE | `PATCH
+          -> (
+            match Uri.path uri with
+            | "" | "/" ->
+                let body =
+                  "This page is intentionally left blank. The graphql endpoint \
+                   can be found at `/graphql`."
+                in
+                respond_with_cors body `OK >>| lift
+            | "/graphql" ->
+                graphql_callback () req body >>= lift_with_cors_graphql
+            | _ ->
+                respond_with_cors "Route not found" `Not_found >>| lift )
         | `Other _ ->
-            respond_with_cors "HTTP method not supported" `Method_not_allowed >>| lift
-        ) )
+            respond_with_cors "HTTP method not supported" `Method_not_allowed
+            >>| lift ) )
   |> Deferred.map ~f:(fun _ ->
          printf "Created %s at: http://localhost:%i/graphql\n%!"
            server_description port )

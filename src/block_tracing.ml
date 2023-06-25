@@ -5,50 +5,28 @@ module Structured_trace = Block_structured_trace
 
 module Distributions = struct
   module D = Distribution.Make (struct
-    type identity = Checkpoint.t [@@deriving to_yojson]
+    type identity = Checkpoint.t [@@deriving yojson]
   end)
 
   include D
 
   type store = (Checkpoint.t, t) Hashtbl.t
 
-  let all_store : store = Hashtbl.create (module Checkpoint)
+  (* TODO: values can be stored as list, because key is value.identity *)
+  let store_to_yojson s =
+    let alist = Hashtbl.to_alist s in
+    [%to_yojson: (Checkpoint.t * t) list] alist
 
-  let produced_store : store = Hashtbl.create (module Checkpoint)
-
-  let external_store : store = Hashtbl.create (module Checkpoint)
-
-  let catchup_store : store = Hashtbl.create (module Checkpoint)
-
-  let reconstruct_store : store = Hashtbl.create (module Checkpoint)
-
-  let unknown_store : store = Hashtbl.create (module Checkpoint)
-
-  let source_store = function
-    | `Catchup ->
-        catchup_store
-    | `Internal ->
-        produced_store
-    | `External ->
-        external_store
-    | `Reconstruct ->
-        reconstruct_store
-    | `Unknown ->
-        unknown_store
+  let store_of_yojson json =
+    Result.map
+      ([%of_yojson: (Checkpoint.t * t) list] json)
+      ~f:(Hashtbl.of_alist_exn (module Checkpoint))
 
   let rec integrate_entry ~store entry =
     let { Structured_trace.Entry.checkpoint; duration; _ } = entry in
     record ~store checkpoint duration ;
     List.iter entry.checkpoints ~f:(integrate_entry ~store) ;
     ()
-
-  let integrate_trace (trace : Structured_trace.t) =
-    let source_store = source_store trace.source in
-    List.iter trace.sections ~f:(fun section ->
-        List.iter section.checkpoints ~f:(integrate_entry ~store:all_store) ;
-        List.iter section.checkpoints ~f:(integrate_entry ~store:source_store) )
-
-  let all () = Hashtbl.data all_store
 end
 
 module Block_id = struct
@@ -81,152 +59,17 @@ module Registry = struct
     | _ ->
         fields
 
+  let trace_info_to_yojson t =
+    match trace_info_to_yojson t with
+    | `Assoc fields ->
+        let fields = filter_metadata_field fields in
+        `Assoc fields
+    | other ->
+        other
+
   type traces = { traces : trace_info list; produced_traces : trace_info list }
   [@@deriving to_yojson]
-
-  let registry : t = Hashtbl.create (module Block_id)
-
-  let postprocess_checkpoints trace =
-    let next_timestamp = ref (List.hd_exn trace).Trace.Entry.started_at in
-    List.map trace ~f:(fun entry ->
-        let ended_at = !next_timestamp in
-        next_timestamp := entry.started_at ;
-        { entry with duration = ended_at -. entry.started_at } )
-
-  let find_trace state_hash = Hashtbl.find registry state_hash
-
-  let all_traces ?max_length ?(offset = 0) ?height
-      ?global_slot:wanted_global_slot ?(chain_length = 1) ?(order = `Asc) () =
-    let in_requested_range ~blockchain_length ~global_slot =
-      match wanted_global_slot with
-      | Some requested ->
-          global_slot <= requested && global_slot > requested - chain_length
-      | None ->
-          let requested = Option.value ~default:blockchain_length height in
-          blockchain_length <= requested
-          && blockchain_length > requested - chain_length
-    in
-    let compare_trace =
-      match order with
-      | `Asc ->
-          fun a b -> Int.compare a.blockchain_length b.blockchain_length
-      | `Desc ->
-          fun b a -> Int.compare a.blockchain_length b.blockchain_length
-    in
-    let traces =
-      Hashtbl.to_alist registry
-      |> List.filter_map ~f:(fun (key, item) ->
-             match key with
-             | global_slot when String.length global_slot < 30 ->
-                 None
-             | state_hash ->
-                 let Trace.
-                       { blockchain_length
-                       ; global_slot
-                       ; source
-                       ; status
-                       ; total_time
-                       ; metadata
-                       ; _
-                       } =
-                   item
-                 in
-                 if in_requested_range ~blockchain_length ~global_slot then
-                   Some
-                     { state_hash
-                     ; blockchain_length
-                     ; global_slot
-                     ; source
-                     ; status
-                     ; started_at = Trace.started_at item
-                     ; total_time
-                     ; metadata
-                     }
-                 else None )
-    in
-    let traces =
-      traces |> List.sort ~compare:compare_trace |> Fn.flip List.drop offset
-    in
-    let produced_traces =
-      Hashtbl.to_alist registry
-      |> List.filter_map ~f:(fun (key, item) ->
-             match key with
-             | state_hash when String.length state_hash > 30 ->
-                 None
-             | _ ->
-                 let state_hash = "<unknown>" in
-                 let Trace.
-                       { blockchain_length
-                       ; source
-                       ; status
-                       ; total_time
-                       ; metadata
-                       ; _
-                       } =
-                   item
-                 in
-                 let global_slot =
-                   try
-                     Yojson.Safe.Util.to_int
-                       (Yojson.Safe.Util.member "global_slot" metadata)
-                   with _ -> 0
-                 in
-                 Some
-                   { state_hash
-                   ; blockchain_length
-                   ; global_slot
-                   ; source
-                   ; status
-                   ; started_at = Trace.started_at item
-                   ; total_time
-                   ; metadata
-                   } )
-      |> List.sort ~compare:compare_trace
-      |> Fn.flip List.drop offset
-    in
-    match max_length with
-    | None ->
-        { traces; produced_traces }
-    | Some max_length ->
-        let traces = List.take traces max_length in
-        let produced_traces = List.take produced_traces max_length in
-        { traces; produced_traces }
-
-  let push_entry ~status ~source ~order ~target_trace block_id entry =
-    Hashtbl.update registry block_id
-      ~f:(Trace.push ~status ~source ~order ~target_trace entry)
-
-  let push_metadata ~metadata block_id =
-    Hashtbl.change registry block_id ~f:(Trace.push_metadata ~metadata)
-
-  let push_global_metadata ~metadata block_id =
-    Hashtbl.change registry block_id ~f:(Trace.push_global_metadata ~metadata)
-
-  let move_trace ~from ~into =
-    match Hashtbl.find_and_remove registry from with
-    | Some trace ->
-        ignore @@ Hashtbl.add registry ~key:into ~data:trace
-    | None ->
-        ()
 end
-
-let external_source_checkpoints =
-  [ "External_block_received"
-  ; "Initial_validation"
-  ; "Verify_blockchain_snarks"
-  ; "Verify_blockchain_snarks_done"
-  ; "Initial_validation_done"
-  ; "Validate_transition"
-  ; "Check_transition_not_in_frontier"
-  ; "Check_transition_not_in_process"
-  ; "Check_transition_can_be_connected"
-  ; "Register_transition_for_processing"
-  ; "Validate_transition_done"
-  ; "Failure"
-  ]
-
-let _is_external_checkpoint =
-  List.mem external_source_checkpoints ~equal:String.equal
 
 let compute_source : Checkpoint.t -> Trace.block_source = function
   | "External_block_received" ->
@@ -237,8 +80,6 @@ let compute_source : Checkpoint.t -> Trace.block_source = function
       `Catchup
   | "Loaded_transition_from_storage" ->
       `Reconstruct
-  (*| external_checkpoint when is_external_checkpoint external_checkpoint ->
-      `External*)
   | _ ->
       `Unknown
 
@@ -249,66 +90,3 @@ let compute_status : Checkpoint.t -> Trace.status = function
       `Failure
   | _ ->
       `Pending
-
-let handle_status_change status block_id =
-  match (status, Hashtbl.find Registry.registry block_id) with
-  | `Success, Some trace
-    when not @@ Trace.equal_status trace.Trace.status `Success ->
-      Block_trace.recalculate_total trace ;
-      let structured = Structured_trace.of_flat_trace trace in
-      Distributions.integrate_trace structured
-  | _ ->
-      ()
-
-let checkpoints_cache = String.Table.create ()
-
-let dedup_checkpoint checkpoint = String.Table.find_or_add checkpoints_cache checkpoint ~default:(fun () -> printf "Adding %s\n%!" checkpoint; checkpoint)
-
-let checkpoint ?metadata ~block_id ~target_trace ?(order = `Append) ~checkpoint
-    ~timestamp () =
-  let checkpoint = dedup_checkpoint checkpoint in
-  let source = compute_source checkpoint in
-  let status = compute_status checkpoint in
-  (* NOTE: here, if successful or failed, the structured trace can be built and stored in the db *)
-  handle_status_change status block_id ;
-  let entry = Trace.Entry.make ?metadata ~timestamp checkpoint in
-  Registry.push_entry ~status ~source ~order ~target_trace block_id entry ;
-  entry
-
-let failure ~reason =
-  checkpoint ~metadata:[ ("reason", `String reason) ] ~checkpoint:"Failure"
-
-let push_metadata ~block_id metadata = Registry.push_metadata ~metadata block_id
-
-let push_global_metadata ~block_id metadata =
-  Registry.push_global_metadata ~metadata block_id
-
-let set_produced_block_state_hash ~block_id state_hash =
-  Registry.move_trace ~from:block_id ~into:state_hash
-
-let record = checkpoint
-
-let record_failure = failure
-
-let nearest_trace ~prev_checkpoint ~timestamp block_id =
-  let trace = Option.value_exn @@ Registry.find_trace block_id in
-  let { Trace.checkpoints; other_checkpoints; _ } = trace in
-  let left =
-    List.find checkpoints ~f:(fun cp ->
-        Float.(cp.Trace.Entry.started_at <= timestamp)
-        && String.equal cp.checkpoint prev_checkpoint )
-  in
-  let right =
-    List.find other_checkpoints ~f:(fun cp ->
-        Float.(cp.Trace.Entry.started_at <= timestamp)
-        && String.equal cp.checkpoint prev_checkpoint )
-  in
-  match (left, right) with
-  | None, None ->
-      `Main
-  | Some _, None ->
-      `Main
-  | None, Some _ ->
-      `Other
-  | Some lcp, Some rcp ->
-      if Float.(lcp.started_at > rcp.started_at) then `Main else `Other

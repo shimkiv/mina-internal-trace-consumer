@@ -2,16 +2,18 @@ open Core
 open Async
 module Block_tracing = Block_tracing
 
-(* TODO: these state must be per log file *)
 module Make (Handler : sig
-  val process_checkpoint : string -> float -> unit
+  val process_checkpoint : string -> float -> unit Deferred.t
 
   val process_control :
-    other:(string * Yojson.Safe.t) list -> string -> Yojson.Safe.t -> unit
+       other:(string * Yojson.Safe.t) list
+    -> string
+    -> Yojson.Safe.t
+    -> unit Deferred.t
 
   val file_changed : unit -> unit
 
-  val eof_reached : unit -> unit
+  val eof_reached : unit -> unit Deferred.t
 end) =
 struct
   let last_rotate_end_timestamp = ref 0.0
@@ -19,17 +21,17 @@ struct
   let process_event original yojson =
     match yojson with
     | `List [ `String checkpoint; `Float timestamp ] ->
-        Handler.process_checkpoint checkpoint timestamp ;
+        let%map () = Handler.process_checkpoint checkpoint timestamp in
         true
     | `Assoc [ ("rotated_log_end", `Float timestamp) ] ->
         last_rotate_end_timestamp := timestamp ;
-        false
+        return false
     | `Assoc ((head, data) :: other) ->
-        Handler.process_control ~other head data ;
+        let%map () = Handler.process_control ~other head data in
         true
     | _ ->
         eprintf "[WARN] unexpected: %s\n%!" original ;
-        true
+        return true
 
   let process_log_rotated_start original yojson =
     match yojson with
@@ -45,11 +47,11 @@ struct
   let process_line ~rotated line =
     try
       let yojson = Yojson.Safe.from_string line in
-      if rotated then process_log_rotated_start line yojson
+      if rotated then return (process_log_rotated_start line yojson)
       else process_event line yojson
     with _ ->
       eprintf "[ERROR] could not parse line: %s\n%!" line ;
-      true
+      return true
 
   let file_changed inode filename =
     try
@@ -86,12 +88,14 @@ struct
     in
     match next_line with
     | `Eof_reached ->
-        if not stop_on_eof then Handler.eof_reached () ;
+        let%bind () =
+          if not stop_on_eof then Handler.eof_reached () else Deferred.unit
+        in
         let%bind () = Clock.after (Time.Span.of_sec 0.2) in
         if stop_on_eof then return `Eof_reached
         else process_reader ~inode ~stop_on_eof ~rotated ~filename reader
     | `Line line ->
-        if process_line ~rotated line then
+        if%bind process_line ~rotated line then
           process_reader ~inode ~stop_on_eof ~rotated:false ~filename reader
         else return `File_rotated
     | `File_changed ->

@@ -10,7 +10,7 @@ module Entry = struct
     ; metadata : Yojson.Safe.t
     ; checkpoints : t list
     }
-  [@@deriving to_yojson]
+  [@@deriving yojson]
 
   let of_flat_entry entry =
     let { Trace.Entry.checkpoint; started_at; duration; metadata } = entry in
@@ -18,7 +18,7 @@ module Entry = struct
 end
 
 type section = { title : string; checkpoints : Entry.t list }
-[@@deriving to_yojson]
+[@@deriving yojson]
 
 type t =
   { source : Trace.block_source
@@ -30,6 +30,12 @@ type t =
   ; metadata : Yojson.Safe.t
   }
 [@@deriving to_yojson]
+
+let started_at t =
+  List.hd t.sections
+  |> Option.bind ~f:(fun s -> List.hd s.checkpoints)
+  |> Option.value_map ~default:(-1.0) ~f:(fun cp ->
+         cp.started_at -. t.total_time )
 
 let checkpoint_children (c : Checkpoint.t) : Checkpoint.t list =
   match c with

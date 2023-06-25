@@ -12,7 +12,7 @@ module Operation = struct
     | `Add_transition_in_db
     | `Move_root_in_db
     | `Set_best_tip_in_db ]
-  [@@deriving to_yojson, enumerate, equal, hash, sexp_of, compare]
+  [@@deriving yojson, enumerate, equal, hash, sexp_of, compare]
 
   let persistent_to_yojson = Util.flatten_yojson_variant persistent_to_yojson
 
@@ -34,12 +34,12 @@ module Operation = struct
     | `Merkle_path_at_addr
     | `Merkle_path_at_index
     | `Get_or_create_account ]
-  [@@deriving to_yojson, enumerate, equal, hash, sexp_of, compare]
+  [@@deriving yojson, enumerate, equal, hash, sexp_of, compare]
 
   let ledger_to_yojson = Util.flatten_yojson_variant ledger_to_yojson
 
   type t = [ persistent | ledger ]
-  [@@deriving to_yojson, enumerate, equal, hash, sexp_of, compare]
+  [@@deriving yojson, enumerate, equal, hash, sexp_of, compare]
 
   let to_string (c : t) =
     match to_yojson c with `String name -> name | _ -> assert false
@@ -47,7 +47,7 @@ end
 
 module Distributions = struct
   module D = Distribution.Make (struct
-    type identity = Operation.t [@@deriving to_yojson]
+    type identity = Operation.t [@@deriving yojson]
   end)
 
   include D
@@ -143,10 +143,12 @@ module Frontier_extensions = struct
           `String (event ^ "/" ^ extension)
       | _ ->
           assert false
+
+    let of_yojson _ = assert false (* TODO implement *)
   end
 
   module D = Distribution.Make (struct
-    type identity = Operation.t [@@deriving to_yojson]
+    type identity = Operation.t [@@deriving yojson]
   end)
 
   include D
