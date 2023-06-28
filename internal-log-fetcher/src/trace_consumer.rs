@@ -1,7 +1,7 @@
 // Copyright (c) Viable Systems
 // SPDX-License-Identifier: Apache-2.0
 
-use std::path::PathBuf;
+use std::{fs::OpenOptions, path::PathBuf};
 
 use tokio::process::Command;
 
@@ -37,6 +37,22 @@ impl TraceConsumer {
     }
 
     pub async fn run(&mut self) -> tokio::io::Result<tokio::process::Child> {
+        let base_path = self.main_trace_file_path.parent().unwrap().to_path_buf();
+
+        let stdout_log_file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .append(true)
+            .open(base_path.join("consumer-stdout.log"))
+            .unwrap();
+
+        let stderr_log_file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .append(true)
+            .open(base_path.join("consumer-stderr.log"))
+            .unwrap();
+
         let child = Command::new(&self.consumer_executable_path)
             .arg("serve")
             .arg("--trace-file")
@@ -45,8 +61,8 @@ impl TraceConsumer {
             .arg(&self.db_path)
             .arg("--port")
             .arg(format!("{}", self.graphql_port))
-            .stdout(std::process::Stdio::null()) // TODO: log to some file instead
-            .stderr(std::process::Stdio::null())
+            .stdout(stdout_log_file)
+            .stderr(stderr_log_file)
             .kill_on_drop(true)
             .spawn()?;
 

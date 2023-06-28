@@ -279,22 +279,30 @@ impl Manager {
             );
             let mut consumer_handle = consumer.run().await.unwrap();
 
+            let stop_reason;
+
             tokio::select! {
                 res = consumer_handle.wait() => {
                     if let Err(status) = res {
                         error!("consumer subprocess for node {node_id} exited with non-zero status: {status}");
+                        stop_reason = "consumer failure";
+                    } else {
+                        stop_reason = "consumer exit";
                     }
                 }
                 res = fetch_loop_handle => {
                     if let Err(e) = res {
-                        error!("Error when running authorize and fetch loop for node {node_id}: {}", e)
+                        error!("Error when running authorize and fetch loop for node {node_id}: {}", e);
+                        stop_reason = "fetch loop error";
+                    } else {
+                        stop_reason = "fetch loop exit";
                     }
                 }
             }
 
             // TODO: save data to another directory
 
-            info!("Finishing thread for node (tracing port: {internal_trace_port}): {node_id}",);
+            info!("Finishing thread for node (tracing port: {internal_trace_port}) node_id={node_id} reason={stop_reason}",);
 
             active.store(false, std::sync::atomic::Ordering::Relaxed);
         });
