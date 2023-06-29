@@ -225,13 +225,15 @@ module Persisted_block_trace = struct
     let trace =
       Int.Map.fold ~init:trace
         ~f:(fun ~key:_ ~data:checkpoints_rev trace ->
-          integrate_extra_checkpoints trace ~checkpoints:(List.rev checkpoints_rev) )
+          integrate_extra_checkpoints trace
+            ~checkpoints:(List.rev checkpoints_rev) )
         prover_checkpoints
     in
     let trace =
       Int.Map.fold ~init:trace
         ~f:(fun ~key:_ ~data:checkpoints_rev trace ->
-          integrate_extra_checkpoints trace ~checkpoints:(List.rev checkpoints_rev) )
+          integrate_extra_checkpoints trace
+            ~checkpoints:(List.rev checkpoints_rev) )
         verifier_checkpoints
     in
     (*if not @@ List.is_empty prover_checkpoints then
@@ -240,11 +242,11 @@ module Persisted_block_trace = struct
         else trace
       in*)
     (*let trace =
-      if not @@ List.is_empty verifier_checkpoints then
-        List.fold verifier_checkpoints ~init:trace ~f:(fun trace _checkpoint ->
-            trace )
-      else trace
-    in*)
+        if not @@ List.is_empty verifier_checkpoints then
+          List.fold verifier_checkpoints ~init:trace ~f:(fun trace _checkpoint ->
+              trace )
+        else trace
+      in*)
     { trace with status }
 
   let to_block_trace_info
@@ -674,24 +676,38 @@ let initialize_database (module Db : Caqti_async.CONNECTION) =
   let%bind () = Db.exec Q.initialize_schema_2 () in
   Db.exec Q.increment_execution_age ()
 
-let add_block_trace (module Db : Caqti_async.CONNECTION) block_id trace =
+let initialize_database pool = Caqti_async.Pool.use initialize_database pool
+
+let add_block_trace block_id trace (module Db : Caqti_async.CONNECTION) =
   (*printf "!!! adding block trace with source: %s\n%!"
     (Block_trace.block_source_to_string trace.Persisted_block_trace.source) ;*)
   Db.find Q.add_block_trace (block_id, trace)
 
-let update_block_trace (module Db : Caqti_async.CONNECTION) block_trace_id trace
+let add_block_trace pool block_id trace =
+  Caqti_async.Pool.use (add_block_trace block_id trace) pool
+
+let update_block_trace block_trace_id trace (module Db : Caqti_async.CONNECTION)
     =
   Db.exec Q.update_block_trace (trace, block_trace_id)
 
-let get_block_traces (module Db : Caqti_async.CONNECTION) block_id =
+let update_block_trace pool block_trace_id trace =
+  Caqti_async.Pool.use (update_block_trace block_trace_id trace) pool
+
+let get_block_traces block_id (module Db : Caqti_async.CONNECTION) =
   Db.collect_list Q.select_block_traces block_id
 
-let get_block_trace_by_id (module Db : Caqti_async.CONNECTION) block_trace_id =
+let get_block_traces pool block_id =
+  Caqti_async.Pool.use (get_block_traces block_id) pool
+
+let get_block_trace_by_id block_trace_id (module Db : Caqti_async.CONNECTION) =
   Db.find Q.select_block_trace block_trace_id
 
-let get_block_trace_info_entries (module Db : Caqti_async.CONNECTION)
-    ?(max_length = 10_000) ?(offset = 0) ?height ?global_slot
-    ?(chain_length = 1) ?(order = `Asc) () =
+let get_block_trace_by_id pool block_trace_id =
+  Caqti_async.Pool.use (get_block_trace_by_id block_trace_id) pool
+
+let get_block_trace_info_entries ?(max_length = 10_000) ?(offset = 0) ?height
+    ?global_slot ?(chain_length = 1) ?(order = `Asc)
+    (module Db : Caqti_async.CONNECTION) =
   match (global_slot, height) with
   | Some global_slot_end, _ ->
       let global_slot_start = global_slot_end - chain_length in
@@ -708,24 +724,51 @@ let get_block_trace_info_entries (module Db : Caqti_async.CONNECTION)
         (Q.select_block_trace_info_entries order)
         (max_length, offset)
 
-let add_block_trace_checkpoint (module Db : Caqti_async.CONNECTION)
-    block_trace_id is_main source call_id checkpoint =
+let get_block_trace_info_entries pool ?max_length ?offset ?height ?global_slot
+    ?chain_length ?order () =
+  Caqti_async.Pool.use
+    (get_block_trace_info_entries ?max_length ?offset ?height ?global_slot
+       ?chain_length ?order )
+    pool
+
+let add_block_trace_checkpoint block_trace_id is_main source call_id checkpoint
+    (module Db : Caqti_async.CONNECTION) =
   Db.exec Q.add_block_trace_checkpoint
     (block_trace_id, is_main, { source; call_id; checkpoint })
 
-let get_block_trace_checkpoints (module Db : Caqti_async.CONNECTION) ~main_trace
-    block_trace_id =
+let add_block_trace_checkpoint pool block_trace_id is_main source call_id
+    checkpoint =
+  Caqti_async.Pool.use
+    (add_block_trace_checkpoint block_trace_id is_main source call_id checkpoint)
+    pool
+
+let get_block_trace_checkpoints ~main_trace block_trace_id
+    (module Db : Caqti_async.CONNECTION) =
   Db.collect_list Q.select_block_trace_checkpoints (block_trace_id, main_trace)
 
-let update_block_trace_block_id (module Db : Caqti_async.CONNECTION)
-    block_trace_id block_id =
+let get_block_trace_checkpoints pool ~main_trace block_trace_id =
+  Caqti_async.Pool.use
+    (get_block_trace_checkpoints ~main_trace block_trace_id)
+    pool
+
+let update_block_trace_block_id block_trace_id block_id
+    (module Db : Caqti_async.CONNECTION) =
   Db.exec Q.update_block_trace_block_id (block_id, block_trace_id)
 
-let set_value (module Db : Caqti_async.CONNECTION) key value =
+let update_block_trace_block_id pool block_trace_id block_id =
+  Caqti_async.Pool.use
+    (update_block_trace_block_id block_trace_id block_id)
+    pool
+
+let set_value key value (module Db : Caqti_async.CONNECTION) =
   Db.exec Q.set_value (key, value)
 
-let get_value (module Db : Caqti_async.CONNECTION) key =
+let set_value pool key value = Caqti_async.Pool.use (set_value key value) pool
+
+let get_value key (module Db : Caqti_async.CONNECTION) =
   Db.find_opt Q.get_value key
+
+let get_value pool key = Caqti_async.Pool.use (get_value key) pool
 
 module Testing = struct
   let report_error = function
@@ -793,5 +836,13 @@ module Testing = struct
        in
        printf "dburi: %s\n%!" dburi ;
        let dburi = Uri.of_string dburi in
-       fun () -> Caqti_async.with_connection dburi test_db >>= report_error )
+       fun () ->
+         let pool =
+           match Caqti_async.connect_pool dburi with
+           | Error err ->
+               failwith (Caqti_error.show err)
+           | Ok pool ->
+               pool
+         in
+         test_db pool >>= report_error )
 end

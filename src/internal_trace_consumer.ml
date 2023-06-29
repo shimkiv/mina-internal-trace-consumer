@@ -409,19 +409,17 @@ let add_filename_prefix original_path ~prefix =
   let open Filename in
   concat (dirname original_path) (prefix ^ basename original_path)
 
-let with_database dburi f =
-  let open Deferred.Let_syntax in
-  let%map result = Caqti_async.with_connection dburi f in
-  match result with
-  | Ok result ->
-      result
+let open_database_or_fail dburi =
+  match Caqti_async.connect_pool dburi with
   | Error error ->
       Format.eprintf "[ERROR] Failure when opening database: %a" Caqti_error.pp
         error ;
       Core.exit 1
+  | Ok pool ->
+      pool
 
 let serve =
-  Command.async ~summary:"Internal trace processor with GraphQL server"
+  Command.async_or_error ~summary:"Internal trace processor with GraphQL server"
     (let%map_open.Command port =
        flag "--port" ~aliases:[ "port" ]
          (optional_with_default 9080 int)
@@ -442,11 +440,10 @@ let serve =
      fun () ->
        let dburi = "sqlite3://" ^ db_path in
        let dburi = Uri.of_string dburi in
-       with_database dburi
-       @@ fun conn ->
-       let%bind result = Store.initialize_database conn in
+       let pool = open_database_or_fail dburi in
+       let%bind result = Store.initialize_database pool in
        show_result_error result ;
-       Persistent_registry.set conn ;
+       Persistent_registry.Db.set pool ;
        let insecure_rest_server = true in
        printf "Starting server on port %d...\n%!" port ;
        let%bind () =
