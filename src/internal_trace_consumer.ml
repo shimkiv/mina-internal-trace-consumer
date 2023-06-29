@@ -449,7 +449,7 @@ let serve =
        Persistent_registry.set conn ;
        let insecure_rest_server = true in
        printf "Starting server on port %d...\n%!" port ;
-       let%bind _ =
+       let%bind () =
          Graphql_server.create_graphql_server
            ~bind_to_address:
              Tcp.Bind_to_address.(
