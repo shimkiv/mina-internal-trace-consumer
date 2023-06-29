@@ -115,7 +115,7 @@ let handle_status_change block_trace_id status =
   | _, Some `Success ->
       return ()
   | status, Some old_status
-    when not @@ Block_trace.equal_status old_status status ->
+    when not @@ Block_trace.equal_status old_status status -> (
       let pool = Db.get () in
       let%bind _block_id, trace =
         Store.get_block_trace_by_id pool block_trace_id
@@ -133,34 +133,42 @@ let handle_status_change block_trace_id status =
                  None )
       in
       let first_checkpoint =
-        List.find_map_exn
+        List.find_map
           ~f:(function
             | { checkpoint = `Checkpoint (name, _); _ } -> Some name | _ -> None
             )
           checkpoints
       in
-      let source = Block_tracing.compute_source first_checkpoint in
-      let started_at =
-        Option.value_exn @@ List.min_elt ~compare:Float.compare timestamps
-      in
-      let completed_at =
-        Option.value_exn @@ List.max_elt ~compare:Float.compare timestamps
-      in
-      let total_time = completed_at -. started_at in
-      let trace = { trace with status; started_at; total_time; source } in
-      let%bind () = Store.update_block_trace pool block_trace_id trace in
-      ignore
-      @@ Int.Table.add block_trace_status ~key:block_trace_id ~data:status ;
-      let%bind () =
-        if Block_trace.equal_status status `Success then
-          let trace =
-            Store.Persisted_block_trace.to_block_trace ~checkpoints trace
+      match first_checkpoint with
+      | None ->
+          eprintf
+            "[WARN] status change issued for a trace with no checkpoints: id=%d\n\
+             %!"
+            block_trace_id ;
+          return ()
+      | Some first_checkpoint ->
+          let source = Block_tracing.compute_source first_checkpoint in
+          let started_at =
+            Option.value_exn @@ List.min_elt ~compare:Float.compare timestamps
           in
-          let trace = Block_structured_trace.of_flat_trace trace in
-          update_distributions trace
-        else return ()
-      in
-      return ()
+          let completed_at =
+            Option.value_exn @@ List.max_elt ~compare:Float.compare timestamps
+          in
+          let total_time = completed_at -. started_at in
+          let trace = { trace with status; started_at; total_time; source } in
+          let%bind () = Store.update_block_trace pool block_trace_id trace in
+          ignore
+          @@ Int.Table.add block_trace_status ~key:block_trace_id ~data:status ;
+          let%bind () =
+            if Block_trace.equal_status status `Success then
+              let trace =
+                Store.Persisted_block_trace.to_block_trace ~checkpoints trace
+              in
+              let trace = Block_structured_trace.of_flat_trace trace in
+              update_distributions trace
+            else return ()
+          in
+          return () )
   | _ ->
       return ()
 
