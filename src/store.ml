@@ -60,9 +60,9 @@ let push_kimchi_checkpoints_from_metadata _trace parent_entry
       | `Metadata metadata ->
           !current_entry.metadata <- `Assoc metadata )
   with exn ->
-    eprintf "[WARN] failed to integrate kimchi checkpoints: %s\n%!"
+    Log.Global.error "[WARN] failed to integrate kimchi checkpoints: %s"
       (Exn.to_string exn) ;
-    eprintf "BACKTRACE:\n%s\n%!" (Printexc.get_backtrace ())
+    Log.Global.error "BACKTRACE:\n%s" (Printexc.get_backtrace ())
 
 module Persisted_block_trace = struct
   open Block_trace

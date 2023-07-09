@@ -141,9 +141,8 @@ let handle_status_change block_trace_id status =
       in
       match first_checkpoint with
       | None ->
-          eprintf
-            "[WARN] status change issued for a trace with no checkpoints: id=%d\n\
-             %!"
+          Log.Global.error
+            "[WARN] status change issued for a trace with no checkpoints: id=%d"
             block_trace_id ;
           return ()
       | Some first_checkpoint ->

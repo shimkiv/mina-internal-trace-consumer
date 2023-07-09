@@ -8,14 +8,14 @@ let show_result_error = function
   | Ok _ ->
       ()
   | Error error ->
-      printf "SQL ERROR: %s\n%!" (Caqti_error.show error)
+      Log.Global.error "SQL ERROR: %s" (Caqti_error.show error)
 
 let current_trace_id ?(source = `Unknown) () =
   match%map
     Persistent_registry.get_or_add_block_trace ~source !current_block
   with
   | Error err ->
-      eprintf "[ERROR] could not get_or_add_trace %s: %s" !current_block
+      Log.Global.error "could not get_or_add_trace %s: %s" !current_block
         (Caqti_error.show err) ;
       0
   | Ok id ->
@@ -102,7 +102,8 @@ let add_pending_entries_to_block_trace ~entries_source ~block_trace_id
       (* TODO: loop but with target = `Other? *)
       return ()
   | Error err ->
-      eprintf "[WARN] failure when trying to find nearest checkpoint: %s\n%!"
+      Log.Global.error
+        "[WARN] failure when trying to find nearest checkpoint: %s"
         (Caqti_error.show err) ;
       return ()
 
@@ -124,7 +125,7 @@ let handle_pending_entries ~call_id ~entries_source ~context_blocks
               | Some block_id -> (
                   match Persistent_registry.block_trace_id block_id with
                   | None ->
-                      eprintf "[WARN] could not find trace id for %s\n%!"
+                      Log.Global.error "[WARN] could not find trace id for %s"
                         block_id ;
                       return false
                   | Some block_trace_id ->
@@ -145,14 +146,13 @@ let handle_pending_entries ~call_id ~entries_source ~context_blocks
           (* Still not complete, wait and try again later *)
           return true )
   | Control (name, _) :: _ ->
-      eprintf
+      Log.Global.error
         "[WARN] unexpected non-checkpoint entry '%s' found as first element in \
-         pending trace\n\
-         %!"
+         pending trace"
         name ;
       return false
   | _ ->
-      eprintf "[WARN] empty list in pending trace\n%!" ;
+      Log.Global.error "[WARN] empty list in pending trace" ;
       return false
 
 (* Pending, complete verifier/prover traces are matched to a block trace by their timestamp
@@ -283,7 +283,7 @@ module Main_handler = struct
             in
             Deferred.unit
         | Some other ->
-            eprintf "Got unexpected value for `current_call_tag`: %s\n%!"
+            Log.Global.error "Got unexpected value for `current_call_tag`: %s"
               (Yojson.Safe.to_string other) ;
             Deferred.unit )
     | "metadata" ->
@@ -318,7 +318,7 @@ module Main_handler = struct
         (* TODO: should clear all old data here? *)
         Deferred.unit
     | another ->
-        eprintf "[WARN] unprocessed control: %s\n%!" another ;
+        Log.Global.error "[WARN] unprocessed control: %s" another ;
         Deferred.unit
 
   (* TODO: reset all traces too? *)
@@ -412,8 +412,8 @@ let add_filename_prefix original_path ~prefix =
 let open_database_or_fail dburi =
   match Caqti_async.connect_pool dburi with
   | Error error ->
-      Format.eprintf "[ERROR] Failure when opening database: %a" Caqti_error.pp
-        error ;
+      Async.Log.Global.error "Failure when opening database: %s"
+        (Caqti_error.show error) ;
       Core.exit 1
   | Ok pool ->
       pool
@@ -445,7 +445,7 @@ let serve =
        show_result_error result ;
        Persistent_registry.Db.set pool ;
        let insecure_rest_server = true in
-       printf "Starting server on port %d...\n%!" port ;
+       Log.Global.info "Starting server on port %d..." port ;
        let%bind () =
          Graphql_server.create_graphql_server
            ~bind_to_address:
@@ -454,11 +454,11 @@ let serve =
            ~schema:Graphql_server.schema ~server_description:"GraphQL server"
            port
        in
-       printf "Consuming main trace events from file: %s\n%!"
+       Log.Global.info "Consuming main trace events from file: %s"
          main_trace_file_path ;
-       printf "Consuming prover trace events from file: %s\n%!"
+       Log.Global.info "Consuming prover trace events from file: %s"
          prover_trace_file_path ;
-       printf "Consuming verifier trace events from file: %s\n%!"
+       Log.Global.info "Consuming verifier trace events from file: %s"
          verifier_trace_file_path ;
        let%bind () =
          Main_trace_processor.process_roated_files main_trace_file_path
@@ -478,7 +478,7 @@ let serve =
          in
          Verifier_trace_processor.process_file verifier_trace_file_path
        in
-       printf "Done\n%!" ; Deferred.return (Ok ()) )
+       Log.Global.info "Done" ; Deferred.return (Ok ()) )
 
 let commands =
   [ ("serve", serve); ("test-storage", Store.Testing.test_storage) ]

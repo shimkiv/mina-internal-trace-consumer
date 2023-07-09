@@ -8,7 +8,7 @@ let show_result_error = function
   | Ok _ ->
       ()
   | Error error ->
-      printf "SQL ERROR: %s\n%!" (Caqti_error.show error)
+      Log.Global.error "SQL ERROR: %s" (Caqti_error.show error)
 
 module Queries = struct
   open Graphql_async
@@ -168,7 +168,7 @@ let create_graphql_server ~bind_to_address ~schema ~server_description port =
       ~on_handler_error:
         (`Call
           (fun _net exn ->
-            printf "Exception while handling REST server request: %s\n%!"
+            Log.Global.error "Exception while handling REST server request: %s"
               (Exn.to_string_mach exn) ) )
       (Tcp.Where_to_listen.bind_to bind_to_address (On_port port))
       (fun ~body _sock req ->
@@ -204,7 +204,7 @@ let create_graphql_server ~bind_to_address ~schema ~server_description port =
             respond_with_cors "HTTP method not supported" `Method_not_allowed
             >>| lift ) )
   |> Deferred.map ~f:(fun _ ->
-         printf "Created %s at: http://localhost:%i/graphql\n%!"
+         Log.Global.info "Created %s at: http://localhost:%i/graphql"
            server_description port )
 
 let schema =

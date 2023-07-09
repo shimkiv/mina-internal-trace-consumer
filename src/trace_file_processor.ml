@@ -30,7 +30,7 @@ struct
         let%map () = Handler.process_control ~other head data in
         true
     | _ ->
-        eprintf "[WARN] unexpected: %s\n%!" original ;
+        Log.Global.error "[WARN] unexpected: %s" original ;
         return true
 
   let process_log_rotated_start original yojson =
@@ -38,10 +38,12 @@ struct
     | `Assoc [ ("rotated_log_start", `Float timestamp) ] ->
         if Float.(timestamp >= !last_rotate_end_timestamp) then true
         else (
-          eprintf "[WARN] file rotatation issued but file didn't rotate\n%!" ;
+          Log.Global.error
+            "[WARN] file rotatation issued but file didn't rotate" ;
           false )
     | _ ->
-        eprintf "[WARN] expected rotated_log_start, but got: %s\n%!" original ;
+        Log.Global.error "[WARN] expected rotated_log_start, but got: %s"
+          original ;
         false
 
   let process_line ~rotated line =
@@ -50,7 +52,7 @@ struct
       if rotated then return (process_log_rotated_start line yojson)
       else process_event line yojson
     with _ ->
-      eprintf "[ERROR] could not parse line: %s\n%!" line ;
+      Log.Global.error "[ERROR] could not parse line: %s" line ;
       return true
 
   let file_changed inode filename =
@@ -58,7 +60,7 @@ struct
       let stat = Core.Unix.stat filename in
       inode <> stat.st_ino
     with Unix.Unix_error _ ->
-      eprintf "File '%s' removed\n%!" filename ;
+      Log.Global.error "File '%s' removed" filename ;
       true
 
   let really_read_line ~inode ~filename ~wait_time reader =
@@ -112,19 +114,19 @@ struct
       in
       match result with
       | Ok `File_rotated when without_rotation ->
-          printf "Done processing rotated file %s\n%!" filename ;
+          Log.Global.info "Done processing rotated file %s" filename ;
           Deferred.unit
       | Ok `Eof_reached ->
-          printf "Done processing rotated file %s\n%!" filename ;
+          Log.Global.info "Done processing rotated file %s" filename ;
           Deferred.unit
       | Ok `File_rotated ->
-          printf "File rotated, re-opening %s\n%!" filename ;
+          Log.Global.info "File rotated, re-opening %s" filename ;
           let%bind () = Clock.after (Time.Span.of_sec 2.0) in
           loop true
       | Ok `File_changed ->
           Handler.file_changed () ;
           last_rotate_end_timestamp := 0.0 ;
-          printf "File changed, re-opening %s\n%!" filename ;
+          Log.Global.info "File changed, re-opening %s" filename ;
           let%bind () = Clock.after (Time.Span.of_sec 2.0) in
           loop false
       | Error exn ->
@@ -137,7 +139,7 @@ struct
           let%bind () = Clock.after (Time.Span.of_sec 20.0) in
           loop rotated
     in
-    printf "Begin processing trace file: %s\n%!" filename ;
+    Log.Global.info "Begin processing trace file: %s" filename ;
     loop false
 
   let process_roated_files filename =

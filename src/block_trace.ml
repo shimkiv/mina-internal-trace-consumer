@@ -101,7 +101,8 @@ let recalculate_total trace =
     let finished_at = (List.hd_exn trace.checkpoints).started_at in
     trace.total_time <- finished_at -. started_at
   with _ ->
-    eprintf "[WARN] failure when trying to recalculate trace total time\n%!"
+    Async.Log.Global.error
+      "[WARN] failure when trying to recalculate trace total time"
 
 let push_metadata ~metadata trace =
   match trace with
@@ -204,8 +205,9 @@ let push ~status ~source ~order ~target_trace entry trace =
       try
         let previous, before = (List.hd_exn before, List.tl_exn before) in
         if not (String.equal previous.checkpoint prev_checkpoint) then
-          eprintf "[ERROR] expected previous checkpoint %s but got %s\n%!"
-            prev_checkpoint previous.checkpoint ;
+          Async.Log.Global.error
+            "[ERROR] expected previous checkpoint %s but got %s" prev_checkpoint
+            previous.checkpoint ;
         let previous =
           { previous with duration = entry.started_at -. previous.started_at }
         in
