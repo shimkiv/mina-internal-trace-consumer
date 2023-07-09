@@ -128,12 +128,13 @@ struct
           let%bind () = Clock.after (Time.Span.of_sec 2.0) in
           loop false
       | Error exn ->
-          eprintf
-            "File '%s' could not be opened, retrying after 5 seconds. Reason:\n\
+          ignore exn ;
+          (*eprintf
+            "File '%s' could not be opened, retrying in 20 seconds. Reason:\n\
              %s\n\
              %!"
-            filename (Exn.to_string exn) ;
-          let%bind () = Clock.after (Time.Span.of_sec 5.0) in
+            filename (Exn.to_string exn) ;*)
+          let%bind () = Clock.after (Time.Span.of_sec 20.0) in
           loop rotated
     in
     printf "Begin processing trace file: %s\n%!" filename ;
