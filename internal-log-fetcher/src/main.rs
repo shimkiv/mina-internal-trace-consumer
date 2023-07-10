@@ -298,8 +298,11 @@ impl Manager {
                         stop_reason = "fetch loop exit";
                     }
 
+                    info!("Killing consumer process");
                     if let Err(err) = consumer_handle.kill().await {
                         error!("Failed to kill consumer subprocess: {err}");
+                    } else {
+                        info!("Done killing consumer process");
                     }
                 }
             }
