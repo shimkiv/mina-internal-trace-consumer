@@ -10,7 +10,12 @@ use crate::{
 use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose, Engine};
 use graphql_client::GraphQLQuery;
-use std::{fs::File, io::Write, path::PathBuf};
+use std::{
+    fs::File,
+    io::Write,
+    path::PathBuf,
+    sync::{atomic::AtomicBool, Arc},
+};
 use tracing::{error, info, instrument};
 
 #[derive(Default, Clone)]
@@ -77,10 +82,10 @@ impl MinaServer {
         }
     }
 
-    pub async fn authorize(&mut self) -> Result<()> {
+    pub async fn authorize(&mut self, is_block_producer: Arc<AtomicBool>) -> Result<()> {
         let auth = self.perform_auth_query().await?;
         // TODO: store this information in the node's data
-        let _is_block_producer = auth.is_block_producer;
+        is_block_producer.store(auth.is_block_producer, std::sync::atomic::Ordering::Relaxed);
         self.authorization_info = Some(AuthorizationInfo {
             server_uuid: auth.server_uuid,
             signer_sequence_number: auth.signer_sequence_number.parse()?,
@@ -205,8 +210,11 @@ impl MinaServer {
             node = %self.graphql_uri
         ),
     )]
-    pub async fn authorize_and_run_fetch_loop(&mut self) -> Result<()> {
-        match self.authorize().await {
+    pub async fn authorize_and_run_fetch_loop(
+        &mut self,
+        is_block_producer: Arc<AtomicBool>,
+    ) -> Result<()> {
+        match self.authorize(is_block_producer).await {
             Ok(()) => info!("Authorization Successful"),
             Err(e) => {
                 error!("Authorization failed for node: {}", e);
