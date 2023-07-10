@@ -127,7 +127,7 @@ module Queries = struct
   let get_block_traces_distribution =
     io_field "blockTracesDistribution"
       ~doc:"Block trace checkpoints distribution" ~typ:(non_null json_type)
-      ~args:Arg.([] (* TODOX: add parent checkpoint filter *))
+      ~args:Arg.[]
       ~resolve:(fun _info () ->
         let open Block_tracing.Distributions in
         let%bind all = Persistent_registry.get_distributions () in
@@ -140,11 +140,31 @@ module Queries = struct
         return @@ Ok (listing_to_yojson distributions |> Yojson.Safe.to_basic)
         )
 
+  let get_block_traces_distribution_structured =
+    io_field "blockTracesDistributionStructured"
+      ~doc:"Block trace checkpoints distribution (structured)"
+      ~typ:(non_null json_type)
+      ~args:Arg.[]
+      ~resolve:(fun _info () ->
+        let%bind all = Persistent_registry.get_distributions () in
+        show_result_error all ;
+        let all =
+          Result.ok all |> Option.value_map ~f:Hashtbl.data ~default:[]
+        in
+        let structured_distributions =
+          Structured_distribution.of_flat_distributions all
+        in
+        return
+        @@ Ok
+             ( Structured_distribution.listing_to_yojson structured_distributions
+             |> Yojson.Safe.to_basic ) )
+
   let commands =
     [ get_block_trace
     ; get_block_structured_trace
     ; list_block_traces
     ; get_block_traces_distribution
+    ; get_block_traces_distribution_structured
     ]
 end
 
