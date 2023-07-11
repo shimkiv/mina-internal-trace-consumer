@@ -205,11 +205,9 @@ module Main_handler = struct
 
   let checkpoint_recording_action () =
     if String.equal !current_block "0" then
-      (* Checkpoints happening outside of any block, or at startup, get dicarded *)
-      (* eprintf "skipping checkpoint because block=0\n%!" ; *)
+      (* Checkpoints happening outside of block production/processing contexts *)
+      (* Still useful to keep around, can be used for txn/snark pool. etc *)
       `Keep
-      (* FIXME: we use `Keep here because storing this at "0" is
-         still useful to find a "nearest trace" for subprocess checkpoints *)
     else if String.equal !current_call_tag "" then `Keep
     else
       match Hashtbl.find call_tracker (!current_block, !current_call_tag) with
@@ -229,7 +227,7 @@ module Main_handler = struct
     let action = checkpoint_recording_action () in
     match action with
     | `Skip ->
-        (* TODO: this branch is currently unused, see FIXME above *)
+        (* NOTE: this branch is currently unused, storing out-of-block checkpoints is useful too *)
         Deferred.unit
     | (`Keep | `Other) as action ->
         let target_trace =
