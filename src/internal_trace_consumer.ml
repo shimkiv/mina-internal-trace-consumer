@@ -478,8 +478,56 @@ let serve =
        in
        Log.Global.info "Done" ; Deferred.return (Ok ()) )
 
+let process =
+  Command.async_or_error
+    ~summary:"Process a trace file and save results in database"
+    (let%map_open.Command main_trace_file_path =
+       flag "--trace-file" ~aliases:[ "trace-file" ] (required string)
+         ~doc:"Path to main internal trace file"
+     and db_path =
+       flag "--db-path" ~aliases:[ "db-path" ] (required string)
+         ~doc:"Persisted traces db"
+     in
+     let prover_trace_file_path =
+       add_filename_prefix main_trace_file_path ~prefix:"prover-"
+     in
+     let verifier_trace_file_path =
+       add_filename_prefix main_trace_file_path ~prefix:"verifier-"
+     in
+     fun () ->
+       let dburi = "sqlite3://" ^ db_path in
+       let dburi = Uri.of_string dburi in
+       let pool = open_database_or_fail dburi in
+       let%bind result = Store.initialize_database pool in
+       show_result_error result ;
+       Persistent_registry.Db.set pool ;
+       Log.Global.info "Consuming main trace events from file: %s"
+         main_trace_file_path ;
+       Log.Global.info "Consuming prover trace events from file: %s"
+         prover_trace_file_path ;
+       Log.Global.info "Consuming verifier trace events from file: %s"
+         verifier_trace_file_path ;
+       let without_rotation = true in
+       let retry_open = false in
+       let%bind () =
+         Main_trace_processor.process_file ~without_rotation
+           main_trace_file_path
+       in
+       let%bind () =
+         Prover_trace_processor.process_file ~without_rotation ~retry_open
+           prover_trace_file_path
+       in
+       let%bind () =
+         Verifier_trace_processor.process_file ~without_rotation ~retry_open
+           verifier_trace_file_path
+       in
+       Log.Global.info "Done" ; Deferred.return (Ok ()) )
+
 let commands =
-  [ ("serve", serve); ("test-storage", Store.Testing.test_storage) ]
+  [ ("serve", serve)
+  ; ("process", process)
+  ; ("test-storage", Store.Testing.test_storage)
+  ]
 
 let () =
   Async.Signal.handle [ Async.Signal.term; Async.Signal.int ] ~f:(fun _ ->

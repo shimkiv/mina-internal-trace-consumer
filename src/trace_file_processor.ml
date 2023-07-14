@@ -103,7 +103,7 @@ struct
     | `File_changed ->
         return `File_changed
 
-  let process_file ?(without_rotation = false) filename =
+  let process_file ?(without_rotation = false) ?(retry_open = true) filename =
     let rec loop rotated =
       let%bind result =
         try_with (fun () ->
@@ -136,8 +136,10 @@ struct
              %s\n\
              %!"
             filename (Exn.to_string exn) ;*)
-          let%bind () = Clock.after (Time.Span.of_sec 20.0) in
-          loop rotated
+          if retry_open then
+            let%bind () = Clock.after (Time.Span.of_sec 20.0) in
+            loop rotated
+          else Deferred.unit
     in
     Log.Global.info "Begin processing trace file: %s" filename ;
     loop false
