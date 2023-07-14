@@ -197,13 +197,11 @@ impl Manager {
                     node.construct_directory_name(),
                     node_state.internal_tracing_port
                 );
+                // Fetcher and consumer loop for this node will detect this change and shut down the loop
                 node_state
                     .active
                     .store(false, std::sync::atomic::Ordering::Relaxed);
             }
-            // TODO: shutdown loop (send message to stop?)
-            // but if this really happens, the loop will fail by itself anyway
-            // alternatively, a timeout can be added to the listening of the spawned loop and the active var checked
         }
 
         // Update the list of available nodes to contain only the currently active nodes
@@ -280,35 +278,57 @@ impl Manager {
             );
             let mut consumer_handle = consumer.run().await.unwrap();
 
-            let stop_reason;
+            let notify_exit = Arc::new(tokio::sync::Notify::new());
+            tokio::task::spawn({
+                let notify_exit = Arc::clone(&notify_exit);
+                let active = Arc::clone(&active);
+                async move {
+                    loop {
+                        if !active.load(std::sync::atomic::Ordering::Relaxed) {
+                            notify_exit.notify_waiters();
+                            break;
+                        }
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                    }
+                }
+            });
 
-            tokio::select! {
+            async fn kill_consumer_process(mut process: tokio::process::Child) {
+                info!("Killing consumer process");
+                if let Err(err) = process.kill().await {
+                    error!("Failed to kill consumer subprocess: {err}");
+                } else {
+                    info!("Done killing consumer process");
+                }
+            }
+
+            let stop_reason = tokio::select! {
                 res = consumer_handle.wait() => {
                     if let Err(status) = res {
                         error!("consumer subprocess for node {node_id} exited with non-zero status: {status}");
-                        stop_reason = "consumer failure";
+                        "consumer failure"
                     } else {
-                        stop_reason = "consumer exit";
+                        "consumer exit"
                     }
                 }
                 res = fetch_loop_handle => {
                     if let Err(e) = res {
                         error!("Error when running authorize and fetch loop for node {node_id}: {}", e);
-                        stop_reason = "fetch loop error";
+                        kill_consumer_process(consumer_handle).await;
+                        "fetch loop error"
                     } else {
-                        stop_reason = "fetch loop exit";
-                    }
-
-                    info!("Killing consumer process");
-                    if let Err(err) = consumer_handle.kill().await {
-                        error!("Failed to kill consumer subprocess: {err}");
-                    } else {
-                        info!("Done killing consumer process");
+                        kill_consumer_process(consumer_handle).await;
+                        "fetch loop exit"
                     }
                 }
-            }
+                _ = notify_exit.notified() => {
+                    info!("Node deactivated by discovery: {node_id}");
+                    kill_consumer_process(consumer_handle).await;
+                    "discovery exit"
+                }
+            };
 
-            // TODO: save data to another directory
+            // TODO: save data to another directory?
 
             info!("Finishing thread for node (tracing port: {internal_trace_port}) node_id={node_id} reason={stop_reason}",);
 
