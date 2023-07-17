@@ -46,7 +46,11 @@ impl DiscoveryService {
         &mut self,
         params: DiscoveryParams,
     ) -> Result<HashSet<NodeIdentity>> {
-        let before = Utc::now() - chrono::Duration::minutes(params.offset_min as i64);
+        // We add 30 extra seconds of grace period because sometimes some nodes don't
+        // make it in time.
+        let before = Utc::now()
+            - chrono::Duration::minutes(params.offset_min as i64)
+            - chrono::Duration::seconds(30);
         let offset: Path = offset_by_time(before).try_into()?;
         let prefix: Path = "submissions".into();
         info!("Obtaining list of objects in bucket...");
