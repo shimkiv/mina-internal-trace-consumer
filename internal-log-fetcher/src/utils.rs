@@ -4,6 +4,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use std::{
+    collections::HashMap,
     fs::{File, OpenOptions},
     path::{Path, PathBuf},
 };
@@ -40,6 +41,11 @@ pub fn read_secret_key_base64(secret_key_path: &PathBuf) -> Result<String> {
         .with_context(|| format!("Failed to read secret key from {:?}", secret_key_path))
 }
 
+pub fn load_node_name_map(node_name_map_path: &PathBuf) -> Result<HashMap<String, String>> {
+    let file = File::open(node_name_map_path)?;
+    Ok(serde_json::from_reader(file)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -57,5 +63,11 @@ mod tests {
             expected_float,
             result
         );
+    }
+
+    #[test]
+    fn test_load_node_name_map() {
+        let name_map = load_node_name_map(&PathBuf::from("test-data/node_names.json"))
+            .expect("Failed to read names map json");
     }
 }

@@ -13,6 +13,7 @@ pub struct NodeDescription {
     pub submitter_pk: Option<String>,
     pub internal_trace_port: u16,
     pub is_block_producer: bool,
+    pub name: Option<String>,
 }
 
 impl From<(&NodeIdentity, &NodeInfo)> for NodeDescription {
@@ -23,7 +24,10 @@ impl From<(&NodeIdentity, &NodeInfo)> for NodeDescription {
             graphql_port: id.graphql_port,
             submitter_pk: id.submitter_pk.clone(),
             internal_trace_port: info.internal_tracing_port,
-            is_block_producer: info.is_block_producer.load(std::sync::atomic::Ordering::Relaxed),
+            is_block_producer: info
+                .is_block_producer
+                .load(std::sync::atomic::Ordering::Relaxed),
+            name: info.name.clone(),
         }
     }
 }
