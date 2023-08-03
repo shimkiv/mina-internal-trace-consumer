@@ -14,7 +14,7 @@ use tokio::{sync::RwLock, time};
 use trace_consumer::TraceConsumer;
 use tracing::{debug, error, info};
 
-use crate::utils::read_secret_key_base64;
+use crate::utils::{load_node_name_map, read_secret_key_base64};
 
 mod authentication;
 mod discovery;
@@ -35,6 +35,8 @@ struct Opts {
     secret_key_path: PathBuf,
     #[structopt(short = "o", long, parse(from_os_str))]
     output_dir_path: PathBuf,
+    #[structopt(short = "n", long, parse(from_os_str))]
+    node_names_map: Option<PathBuf>,
     #[structopt(long)]
     https: bool,
 }
@@ -56,6 +58,7 @@ struct NodeInfo {
     internal_tracing_port: u16,
     is_block_producer: Arc<std::sync::atomic::AtomicBool>,
     active: Arc<std::sync::atomic::AtomicBool>,
+    name: Option<String>,
 }
 
 enum NodeDiscoveryMode {
@@ -72,6 +75,7 @@ pub struct Manager {
     secret_key_base64: String,
     consumer_executable_path: String,
     offset_min: u64,
+    node_names: HashMap<String, String>,
 }
 
 #[derive(Clone)]
@@ -99,6 +103,12 @@ impl Manager {
         let consumer_executable_path = std::env::var("INTERNAL_TRACE_CONSUMER_EXE")
             .unwrap_or_else(|_| "../_build/default/src/internal_trace_consumer.exe".to_string());
 
+        let node_names = if let Some(ref node_names_map_path) = opts.node_names_map {
+            load_node_name_map(node_names_map_path)?
+        } else {
+            HashMap::new()
+        };
+
         Ok(Self {
             opts,
             available_nodes: SharedAvailableNodes(Arc::new(RwLock::new(HashSet::new()))),
@@ -108,6 +118,7 @@ impl Manager {
             secret_key_base64,
             consumer_executable_path,
             offset_min: 15,
+            node_names,
         })
     }
 
@@ -155,10 +166,15 @@ impl Manager {
         );
 
         for node in new_nodes {
+            let name = node
+                .submitter_pk
+                .as_ref()
+                .and_then(|submitter| self.node_names.get(submitter));
             let node_info = NodeInfo {
                 internal_tracing_port: self.next_internal_tracing_port,
                 is_block_producer: Arc::new(AtomicBool::new(false)),
                 active: Arc::new(AtomicBool::new(true)),
+                name: name.cloned(),
             };
             info!(
                 "New node {} at port {}",
