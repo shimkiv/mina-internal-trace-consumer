@@ -428,6 +428,11 @@ let serve =
      and db_path =
        flag "--db-path" ~aliases:[ "db-path" ] (required string)
          ~doc:"Persisted traces db"
+     and process_rotated_files =
+       flag "--process-rotated-files"
+         ~aliases:[ "process-rotated-files" ]
+         (optional_with_default false bool)
+         ~doc:"Process log-rotated files"
      in
      let prover_trace_file_path =
        add_filename_prefix main_trace_file_path ~prefix:"prover-"
@@ -459,20 +464,26 @@ let serve =
        Log.Global.info "Consuming verifier trace events from file: %s"
          verifier_trace_file_path ;
        let%bind () =
-         Main_trace_processor.process_roated_files main_trace_file_path
+         if process_rotated_files then
+           Main_trace_processor.process_roated_files main_trace_file_path
+         else Deferred.unit
        in
        let%bind () = Main_trace_processor.process_file main_trace_file_path
        and () =
          let%bind () = Main_handler.synced () in
          let%bind () =
-           Prover_trace_processor.process_roated_files prover_trace_file_path
+           if process_rotated_files then
+             Prover_trace_processor.process_roated_files prover_trace_file_path
+           else Deferred.unit
          in
          Prover_trace_processor.process_file prover_trace_file_path
        and () =
          let%bind () = Main_handler.synced () in
          let%bind () =
-           Verifier_trace_processor.process_roated_files
-             verifier_trace_file_path
+           if process_rotated_files then
+             Verifier_trace_processor.process_roated_files
+               verifier_trace_file_path
+           else Deferred.unit
          in
          Verifier_trace_processor.process_file verifier_trace_file_path
        in
