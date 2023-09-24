@@ -351,6 +351,10 @@ module Main_handler = struct
         (after_time -. before_time) ;*)
     Ivar.fill_if_empty main_trace_synced () ;
     return ()
+
+  let start_file_processing_iteration () = Connection_context.start ()
+
+  let complete_file_processing_iteration () = Connection_context.commit ()
 end
 
 module Prover_handler = struct
@@ -374,6 +378,10 @@ module Prover_handler = struct
   let file_changed () = Int.Table.clear Pending.prover_entries
 
   let eof_reached () = Deferred.unit (* Nothing to do *)
+
+  let start_file_processing_iteration () = Deferred.unit
+
+  let complete_file_processing_iteration () = Deferred.unit
 end
 
 module Verifier_handler = struct
@@ -397,6 +405,10 @@ module Verifier_handler = struct
   let file_changed () = Int.Table.clear Pending.verifier_entries
 
   let eof_reached () = Deferred.unit (* Nothing to do *)
+
+  let start_file_processing_iteration () = Deferred.unit
+
+  let complete_file_processing_iteration () = Deferred.unit
 end
 
 module Main_trace_processor = Trace_file_processor.Make (Main_handler)
@@ -444,9 +456,9 @@ let serve =
        let dburi = "sqlite3://" ^ db_path in
        let dburi = Uri.of_string dburi in
        let pool = open_database_or_fail dburi in
-       let%bind result = Store.initialize_database pool in
+       Connection_context.Db.set pool ;
+       let%bind result = Store.initialize_database () in
        show_result_error result ;
-       Persistent_registry.Db.set pool ;
        let insecure_rest_server = true in
        Log.Global.info "Starting server on port %d..." port ;
        let%bind () =
@@ -509,9 +521,9 @@ let process =
        let dburi = "sqlite3://" ^ db_path in
        let dburi = Uri.of_string dburi in
        let pool = open_database_or_fail dburi in
-       let%bind result = Store.initialize_database pool in
+       Connection_context.Db.set pool ;
+       let%bind result = Store.initialize_database () in
        show_result_error result ;
-       Persistent_registry.Db.set pool ;
        Log.Global.info "Consuming main trace events from file: %s"
          main_trace_file_path ;
        Log.Global.info "Consuming prover trace events from file: %s"

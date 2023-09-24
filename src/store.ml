@@ -403,8 +403,6 @@ module Q = struct
   let block_trace_checkpoint_with_trace_id =
     Caqti_type.(tup3 block_trace_id bool block_trace_checkpoint)
 
-  let pragmas = (unit ->. unit) @@ "PRAGMA synchronous = OFF"
-
   let initialize_schema_0 =
     (unit ->. unit)
       {eos|
@@ -670,40 +668,39 @@ end
 
 let initialize_database (module Db : Caqti_async.CONNECTION) =
   let open Deferred.Result.Let_syntax in
-  let%bind () = Db.exec Q.pragmas () in
   let%bind () = Db.exec Q.initialize_schema_0 () in
   let%bind () = Db.exec Q.initialize_schema_1 () in
   let%bind () = Db.exec Q.initialize_schema_2 () in
   Db.exec Q.increment_execution_age ()
 
-let initialize_database pool = Caqti_async.Pool.use initialize_database pool
+let initialize_database () = Connection_context.use_current initialize_database
 
 let add_block_trace block_id trace (module Db : Caqti_async.CONNECTION) =
   (*printf "!!! adding block trace with source: %s\n%!"
     (Block_trace.block_source_to_string trace.Persisted_block_trace.source) ;*)
   Db.find Q.add_block_trace (block_id, trace)
 
-let add_block_trace pool block_id trace =
-  Caqti_async.Pool.use (add_block_trace block_id trace) pool
+let add_block_trace block_id trace =
+  Connection_context.use_current (add_block_trace block_id trace)
 
 let update_block_trace block_trace_id trace (module Db : Caqti_async.CONNECTION)
     =
   Db.exec Q.update_block_trace (trace, block_trace_id)
 
-let update_block_trace pool block_trace_id trace =
-  Caqti_async.Pool.use (update_block_trace block_trace_id trace) pool
+let update_block_trace block_trace_id trace =
+  Connection_context.use_current (update_block_trace block_trace_id trace)
 
 let get_block_traces block_id (module Db : Caqti_async.CONNECTION) =
   Db.collect_list Q.select_block_traces block_id
 
-let get_block_traces pool block_id =
-  Caqti_async.Pool.use (get_block_traces block_id) pool
+let get_block_traces block_id =
+  Connection_context.use_current (get_block_traces block_id)
 
 let get_block_trace_by_id block_trace_id (module Db : Caqti_async.CONNECTION) =
   Db.find Q.select_block_trace block_trace_id
 
-let get_block_trace_by_id pool block_trace_id =
-  Caqti_async.Pool.use (get_block_trace_by_id block_trace_id) pool
+let get_block_trace_by_id block_trace_id =
+  Connection_context.use_current (get_block_trace_by_id block_trace_id)
 
 let get_block_trace_info_entries ?(max_length = 10_000) ?(offset = 0) ?height
     ?global_slot ?(chain_length = 1) ?(order = `Asc)
@@ -724,51 +721,47 @@ let get_block_trace_info_entries ?(max_length = 10_000) ?(offset = 0) ?height
         (Q.select_block_trace_info_entries order)
         (max_length, offset)
 
-let get_block_trace_info_entries pool ?max_length ?offset ?height ?global_slot
+let get_block_trace_info_entries ?max_length ?offset ?height ?global_slot
     ?chain_length ?order () =
-  Caqti_async.Pool.use
+  Connection_context.use_current
     (get_block_trace_info_entries ?max_length ?offset ?height ?global_slot
        ?chain_length ?order )
-    pool
 
 let add_block_trace_checkpoint block_trace_id is_main source call_id checkpoint
     (module Db : Caqti_async.CONNECTION) =
   Db.exec Q.add_block_trace_checkpoint
     (block_trace_id, is_main, { source; call_id; checkpoint })
 
-let add_block_trace_checkpoint pool block_trace_id is_main source call_id
-    checkpoint =
-  Caqti_async.Pool.use
+let add_block_trace_checkpoint block_trace_id is_main source call_id checkpoint
+    =
+  Connection_context.use_current
     (add_block_trace_checkpoint block_trace_id is_main source call_id checkpoint)
-    pool
 
 let get_block_trace_checkpoints ~main_trace block_trace_id
     (module Db : Caqti_async.CONNECTION) =
   Db.collect_list Q.select_block_trace_checkpoints (block_trace_id, main_trace)
 
-let get_block_trace_checkpoints pool ~main_trace block_trace_id =
-  Caqti_async.Pool.use
+let get_block_trace_checkpoints ~main_trace block_trace_id =
+  Connection_context.use_current
     (get_block_trace_checkpoints ~main_trace block_trace_id)
-    pool
 
 let update_block_trace_block_id block_trace_id block_id
     (module Db : Caqti_async.CONNECTION) =
   Db.exec Q.update_block_trace_block_id (block_id, block_trace_id)
 
-let update_block_trace_block_id pool block_trace_id block_id =
-  Caqti_async.Pool.use
+let update_block_trace_block_id block_trace_id block_id =
+  Connection_context.use_current
     (update_block_trace_block_id block_trace_id block_id)
-    pool
 
 let set_value key value (module Db : Caqti_async.CONNECTION) =
   Db.exec Q.set_value (key, value)
 
-let set_value pool key value = Caqti_async.Pool.use (set_value key value) pool
+let set_value key value = Connection_context.use_current (set_value key value)
 
 let get_value key (module Db : Caqti_async.CONNECTION) =
   Db.find_opt Q.get_value key
 
-let get_value pool key = Caqti_async.Pool.use (get_value key) pool
+let get_value key = Connection_context.use_current (get_value key)
 
 module Testing = struct
   let report_error = function
@@ -778,9 +771,9 @@ module Testing = struct
         print_endline (Caqti_error.show err) ;
         exit 69
 
-  let test_db conn =
+  let test_db () =
     let open Deferred.Result.Let_syntax in
-    let%bind () = initialize_database conn in
+    let%bind () = initialize_database () in
     let trace =
       { Persisted_block_trace.source = `External
       ; blockchain_length = 11
@@ -791,12 +784,12 @@ module Testing = struct
       ; metadata = `Assoc []
       }
     in
-    let%bind block_trace_0_id = add_block_trace conn "test-1" trace in
-    let%bind block_trace_1_id = add_block_trace conn "test-2" trace in
+    let%bind block_trace_0_id = add_block_trace "test-1" trace in
+    let%bind block_trace_1_id = add_block_trace "test-2" trace in
     printf "block trace #0 id=%d\n%!" block_trace_0_id ;
     printf "block trace #1 id=%d\n%!" block_trace_1_id ;
-    let%bind () = update_block_trace_block_id conn block_trace_1_id "test-3" in
-    let%bind result = get_block_traces conn "test-1" in
+    let%bind () = update_block_trace_block_id block_trace_1_id "test-3" in
+    let%bind result = get_block_traces "test-1" in
     let%bind () =
       ( match result with
       | (block_id, trace) :: _ ->
@@ -807,22 +800,22 @@ module Testing = struct
           print_endline "not fund" ) ;
       Deferred.Result.return ()
     in
-    let%bind entries = get_block_trace_info_entries conn () in
+    let%bind entries = get_block_trace_info_entries () in
     printf "Trace entries count: %d\n%!" (List.length entries) ;
     List.iteri entries ~f:(fun i trace ->
         printf "Entry #%d:\n%s\n\n%!" i
           (Yojson.Safe.pretty_to_string
              (Block_tracing.Registry.trace_info_to_yojson trace) ) ) ;
     let%bind checkpoints =
-      get_block_trace_checkpoints conn ~main_trace:true block_trace_0_id
+      get_block_trace_checkpoints ~main_trace:true block_trace_0_id
     in
     printf "Checkpoint entries count: %d\n%!" (List.length checkpoints) ;
     let%bind () =
-      add_block_trace_checkpoint conn block_trace_0_id true `Main 0
+      add_block_trace_checkpoint block_trace_0_id true `Main 0
         (`Checkpoint ("Finish", 12375.0))
     in
     let%map checkpoints =
-      get_block_trace_checkpoints conn ~main_trace:true block_trace_0_id
+      get_block_trace_checkpoints ~main_trace:true block_trace_0_id
     in
     printf "Checkpoint entries count: %d\n%!" (List.length checkpoints) ;
     ()
@@ -844,5 +837,6 @@ module Testing = struct
            | Ok pool ->
                pool
          in
-         test_db pool >>= report_error )
+         Connection_context.Db.set pool ;
+         test_db () >>= report_error )
 end

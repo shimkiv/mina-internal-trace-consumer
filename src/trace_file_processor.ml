@@ -14,6 +14,10 @@ module Make (Handler : sig
   val file_changed : unit -> unit
 
   val eof_reached : unit -> unit Deferred.t
+
+  val start_file_processing_iteration : unit -> unit Deferred.t
+
+  val complete_file_processing_iteration : unit -> unit Deferred.t
 end) =
 struct
   let last_rotate_end_timestamp = ref 0.0
@@ -46,6 +50,7 @@ struct
           original ;
         false
 
+  (* Returns [true] if processing should continue *)
   let process_line ~rotated line =
     try
       let yojson = Yojson.Safe.from_string line in
@@ -90,12 +95,10 @@ struct
     in
     match next_line with
     | `Eof_reached ->
-        let%bind () =
-          if not stop_on_eof then Handler.eof_reached () else Deferred.unit
-        in
-        let%bind () = Clock.after (Time.Span.of_sec 0.2) in
         if stop_on_eof then return `Eof_reached
-        else process_reader ~inode ~stop_on_eof ~rotated ~filename reader
+        else
+          let%bind () = Handler.eof_reached () in
+          return (`Trampoline (Clock.after (Time.Span.of_sec 0.2), rotated))
     | `Line line ->
         if%bind process_line ~rotated line then
           process_reader ~inode ~stop_on_eof ~rotated:false ~filename reader
@@ -103,13 +106,38 @@ struct
     | `File_changed ->
         return `File_changed
 
+  type reader_loop_result = [ `Eof_reached | `File_changed | `File_rotated ]
+
+  let rec process_reader_loop ~inode ~stop_on_eof ~rotated ~filename reader =
+    let%bind result =
+      Connection_context.with_connection (fun () ->
+          let%bind () = Handler.start_file_processing_iteration () in
+          let%bind result =
+            process_reader ~inode ~stop_on_eof ~rotated ~filename reader
+          in
+          let%bind () = Handler.complete_file_processing_iteration () in
+          return (Ok result) )
+    in
+    match result with
+    | Error err ->
+        Log.Global.error "[WARN] Caqti failure in reader process iteration: %s"
+          (Caqti_error.show err) ;
+        return `Eof_reached
+    | Ok result -> (
+        match result with
+        | `Trampoline (wait, rotated) ->
+            let%bind () = wait in
+            process_reader_loop ~inode ~stop_on_eof ~rotated ~filename reader
+        | #reader_loop_result as result ->
+            return result )
+
   let process_file ?(without_rotation = false) ?(retry_open = true) filename =
     let rec loop rotated =
       let%bind result =
         try_with (fun () ->
             Reader.with_file filename
               ~f:
-                (process_reader ~inode:(Core.Unix.stat filename).st_ino
+                (process_reader_loop ~inode:(Core.Unix.stat filename).st_ino
                    ~stop_on_eof:without_rotation ~rotated ~filename ) )
       in
       match result with
