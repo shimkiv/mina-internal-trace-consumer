@@ -10,6 +10,13 @@ let show_result_error = function
   | Error error ->
       Log.Global.error "SQL ERROR: %s" (Caqti_error.show error)
 
+let abort_on_error = function
+  | Ok _ ->
+      Deferred.unit
+  | Error error ->
+      Log.Global.error "SQL ERROR: %s" (Caqti_error.show error) ;
+      exit 1
+
 let current_trace_id ?(source = `Unknown) () =
   match%map
     Persistent_registry.get_or_add_block_trace ~source !current_block
@@ -419,32 +426,65 @@ let add_filename_prefix original_path ~prefix =
   let open Filename in
   concat (dirname original_path) (prefix ^ basename original_path)
 
-let open_database_or_fail dburi =
-  match Caqti_async.connect_pool dburi with
+let open_database_or_fail db_uri =
+  match Caqti_async.connect_pool db_uri with
   | Error error ->
       Async.Log.Global.error "Failure when opening database: %s"
         (Caqti_error.show error) ;
-      Core.exit 1
+      exit 1
   | Ok pool ->
-      pool
+      return pool
+
+let compute_database_engine uri =
+  match Uri.scheme uri with
+  | Some "postgresql" ->
+      `Postgres
+  | Some "sqlite3" ->
+      `Sqlite
+  | _ ->
+      eprintf "Unsupported database engine: %s\n%!" (Uri.to_string uri) ;
+      Core.exit 1
+
+let compute_engine_and_uri ~db_path ~db_uri =
+  match (db_path, db_uri) with
+  | None, None ->
+      Core.prerr_endline
+        "Must provide a path to a Sqlite3 file or an URI for PostgreSQL or \
+         Sqlite3" ;
+      Core.exit 1
+  | Some _, Some _ ->
+      Core.prerr_endline
+        "Must provide either path to a Sqlite3 file or an URI for PostgreSQL \
+         or Sqlite3, but noth both" ;
+      Core.exit 1
+  | Some path, None ->
+      let db_uri = "sqlite3://" ^ path in
+      let db_uri = Uri.of_string db_uri in
+      (db_uri, compute_database_engine db_uri)
+  | None, Some db_uri ->
+      let db_uri = Uri.of_string db_uri in
+      (db_uri, compute_database_engine db_uri)
 
 let serve =
   Command.async_or_error ~summary:"Internal trace processor with GraphQL server"
     (let%map_open.Command port =
        flag "--port" ~aliases:[ "port" ]
          (optional_with_default 9080 int)
-         ~doc:"Port for GraphQL server to listen on (default 9080)"
+         ~doc:"PORT Port for GraphQL server to listen on (default 9080)"
      and main_trace_file_path =
        flag "--trace-file" ~aliases:[ "trace-file" ] (required string)
-         ~doc:"Path to main internal trace file"
-     and dburi =
-       flag "--db-uri" ~aliases:[ "db-uri" ] (required string)
-         ~doc:"Persisted traces URI"
+         ~doc:"PATH Path to main internal trace file"
+     and db_path =
+       flag "--db-path" ~aliases:[ "db-path" ] (optional string)
+         ~doc:"PATH Persisted traces database path"
+     and db_uri =
+       flag "--db-uri" ~aliases:[ "db-uri" ] (optional string)
+         ~doc:"URI Persisted traces database URI"
      and process_rotated_files =
        flag "--process-rotated-files"
          ~aliases:[ "process-rotated-files" ]
          (optional_with_default false bool)
-         ~doc:"Process log-rotated files"
+         ~doc:"BOOL Process log-rotated files"
      in
      let prover_trace_file_path =
        add_filename_prefix main_trace_file_path ~prefix:"prover-"
@@ -453,11 +493,11 @@ let serve =
        add_filename_prefix main_trace_file_path ~prefix:"verifier-"
      in
      fun () ->
-       let dburi = Uri.of_string dburi in
-       let pool = open_database_or_fail dburi in
+       let db_uri, engine = compute_engine_and_uri ~db_path ~db_uri in
+       let%bind pool = open_database_or_fail db_uri in
        Connection_context.Db.set pool ;
-       let%bind result = Store.initialize_database () in
-       show_result_error result ;
+       let%bind result = Store.initialize_database engine in
+       let%bind () = abort_on_error result in
        let insecure_rest_server = true in
        Log.Global.info "Starting server on port %d..." port ;
        let%bind () =
@@ -505,10 +545,13 @@ let process =
     ~summary:"Process a trace file and save results in database"
     (let%map_open.Command main_trace_file_path =
        flag "--trace-file" ~aliases:[ "trace-file" ] (required string)
-         ~doc:"Path to main internal trace file"
-     and dburi =
-       flag "--db-uri" ~aliases:[ "db-uri" ] (required string)
-         ~doc:"Persisted traces URI"
+         ~doc:"PATH Path to main internal trace file"
+     and db_path =
+       flag "--db-path" ~aliases:[ "db-path" ] (optional string)
+         ~doc:"PATH Persisted traces database path"
+     and db_uri =
+       flag "--db-uri" ~aliases:[ "db-uri" ] (optional string)
+         ~doc:"URI Persisted traces database URI"
      in
      let prover_trace_file_path =
        add_filename_prefix main_trace_file_path ~prefix:"prover-"
@@ -517,11 +560,11 @@ let process =
        add_filename_prefix main_trace_file_path ~prefix:"verifier-"
      in
      fun () ->
-       let dburi = Uri.of_string dburi in
-       let pool = open_database_or_fail dburi in
+       let db_uri, engine = compute_engine_and_uri ~db_path ~db_uri in
+       let%bind pool = open_database_or_fail db_uri in
        Connection_context.Db.set pool ;
-       let%bind result = Store.initialize_database () in
-       show_result_error result ;
+       let%bind result = Store.initialize_database engine in
+       let%bind () = abort_on_error result in
        Log.Global.info "Consuming main trace events from file: %s"
          main_trace_file_path ;
        Log.Global.info "Consuming prover trace events from file: %s"

@@ -411,70 +411,81 @@ module Q = struct
   let block_trace_checkpoint_with_trace_id =
     Caqti_type.(tup3 block_trace_id bool block_trace_checkpoint)
 
-  let initialize_schema () =
+  let initialize_schema (engine : [ `Sqlite | `Postgres ]) =
+    let primary_key_int =
+      match engine with
+      | `Sqlite ->
+          "integer PRIMARY KEY AUTOINCREMENT"
+      | `Postgres ->
+          "SERIAL PRIMARY KEY"
+    in
     [ (unit ->. unit)
-        {eos|
+      @@ sprintf
+           {eos|
         CREATE TABLE IF NOT EXISTS block_trace (
-          block_trace_id SERIAL PRIMARY KEY,
-          node_name text NOT NULL,
+          block_trace_id %s,
+          node_name varchar NOT NULL,
           execution_age integer NOT NULL DEFAULT 0,
-          block_id text NOT NULL,
+          block_id varchar NOT NULL,
           trace_started_at float NOT NULL,
           trace_completed_at float,
           total_time float NOT NULL,
-          source text NOT NULL,
+          source varchar NOT NULL,
           blockchain_length int NOT NULL,
           global_slot int NOT NULL,
-          status text NOT NULL,
+          status varchar NOT NULL,
           metadata_json text NOT NULL
-        );
+        )
       |eos}
+           primary_key_int
     ; (unit ->. unit)
         {eos|
         CREATE INDEX IF NOT EXISTS block_trace_block_id_idx
-        ON block_trace (block_id);
+        ON block_trace (block_id)
       |eos}
     ; (unit ->. unit)
         {eos|
         CREATE INDEX IF NOT EXISTS block_trace_node_name_idx
-        ON block_trace (node_name);
+        ON block_trace (node_name)
       |eos}
     ; (unit ->. unit)
         {eos|
         CREATE INDEX IF NOT EXISTS block_trace_execution_age_idx
-        ON block_trace (execution_age);
+        ON block_trace (execution_age)
       |eos}
     ; (unit ->. unit)
-        {eos|
+      @@ sprintf
+           {eos|
         CREATE TABLE IF NOT EXISTS block_trace_checkpoint (
-          block_trace_checkpoint_id SERIAL PRIMARY KEY,
+          block_trace_checkpoint_id %s,
           block_trace_id integer NOT NULL,
           source char NOT NULL, -- M = main, V = verifier, P = prover
           main_trace bool NOT NULL,
           is_control bool NOT NULL,
-          name text NOT NULL,
+          name varchar NOT NULL,
           started_at float NOT NULL,
           metadata_json text,
           call_id int NOT NULL,
 
           FOREIGN KEY (block_trace_id) REFERENCES block_trace(block_trace_id)
-        );
+        )
       |eos}
+           primary_key_int
     ; (unit ->. unit)
         {eos|
         CREATE INDEX IF NOT EXISTS block_trace_checkpoint_source_idx
-        ON block_trace_checkpoint (source);
+        ON block_trace_checkpoint (source)
       |eos}
     ; (unit ->. unit)
         {eos|
         CREATE INDEX IF NOT EXISTS block_trace_checkpoint_main_trace_idx
-        ON block_trace_checkpoint (main_trace);
+        ON block_trace_checkpoint (main_trace)
       |eos}
     ; (unit ->. unit)
         {eos|
         CREATE TABLE IF NOT EXISTS data (
-          key text PRIMARY KEY NOT NULL,
-          node_name text NOT NULL,
+          key varchar PRIMARY KEY NOT NULL,
+          node_name varchar NOT NULL,
           value text NOT NULL
         )
       |eos}
@@ -694,16 +705,17 @@ module Q = struct
          node_name
 end
 
-let initialize_database (module Db : Caqti_async.CONNECTION) =
+let initialize_database engine (module Db : Caqti_async.CONNECTION) =
   let open Deferred.Result.Let_syntax in
   let%bind () =
-    Q.initialize_schema ()
+    Q.initialize_schema engine
     |> Deferred.List.fold ~init:(Ok ()) ~f:(fun acc q ->
            if Result.is_error acc then Deferred.return acc else Db.exec q () )
   in
   Db.exec Q.increment_execution_age ()
 
-let initialize_database () = Connection_context.use_current initialize_database
+let initialize_database engine =
+  Connection_context.use_current (initialize_database engine)
 
 let add_block_trace block_id trace (module Db : Caqti_async.CONNECTION) =
   (*printf "!!! adding block trace with source: %s\n%!"
@@ -803,7 +815,7 @@ module Testing = struct
 
   let test_db () =
     let open Deferred.Result.Let_syntax in
-    let%bind () = initialize_database () in
+    let%bind () = initialize_database `Sqlite in
     let trace =
       { Persisted_block_trace.source = `External
       ; blockchain_length = 11
