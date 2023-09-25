@@ -1,6 +1,14 @@
 open Core
 open Async
 
+let node_name =
+  match Sys.getenv "MINA_NODE_NAME" with
+  | None ->
+      Log.Global.error "[WARN] no MINA_NODE_NAME specified, using \"unknown\"" ;
+      "unknown"
+  | Some name ->
+      name
+
 type checkpoint_entry =
   [ `Checkpoint of string * float | `Control of string * Yojson.Safe.t ]
 
@@ -410,6 +418,7 @@ module Q = struct
 
         CREATE TABLE IF NOT EXISTS block_trace (
           block_trace_id integer PRIMARY KEY AUTOINCREMENT,
+          node_name text NOT NULL,
           execution_age integer NOT NULL DEFAULT 0,
           block_id text NOT NULL,
           trace_started_at float NOT NULL,
@@ -424,6 +433,9 @@ module Q = struct
 
         CREATE INDEX IF NOT EXISTS block_trace_block_id_idx
         ON block_trace (block_id);
+
+        CREATE INDEX IF NOT EXISTS block_trace_node_name_idx
+        ON block_trace (node_name);
 
         CREATE INDEX IF NOT EXISTS block_trace_execution_age_idx
         ON block_trace (execution_age);
@@ -464,28 +476,34 @@ module Q = struct
       {eos|
         CREATE TABLE IF NOT EXISTS data (
           key text PRIMARY KEY NOT NULL,
+          node_name text NOT NULL,
           value text NOT NULL
         )
       |eos}
 
   let increment_execution_age =
     (unit ->. unit)
-      {eos|
-        UPDATE block_trace SET execution_age = execution_age + 1
-      |eos}
+    @@ sprintf
+         {eos|
+           UPDATE block_trace SET execution_age = execution_age + 1
+            WHERE node_name = '%s'
+         |eos}
+         node_name
 
   let add_block_trace =
     (block_trace_with_block_id ->! int)
-      {eos|
+    @@ sprintf
+         {eos|
         INSERT INTO block_trace (
-          block_id,
+          block_id, node_name,
           trace_started_at, trace_completed_at, total_time,
           source, blockchain_length, global_slot, status,
           metadata_json
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, '%s', ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING block_trace_id
       |eos}
+         node_name
 
   let update_block_trace =
     (tup2 block_trace block_trace_id ->. unit)
@@ -510,7 +528,8 @@ module Q = struct
 
   let select_block_traces =
     (block_id ->* block_trace_with_id)
-      {eos|
+    @@ sprintf
+         {eos|
         SELECT
           block_trace_id,
           trace_started_at, trace_completed_at, total_time,
@@ -518,9 +537,11 @@ module Q = struct
           metadata_json
         FROM block_trace
         WHERE block_id = ?
+          AND node_name = '%s'
         ORDER BY execution_age ASC, block_trace_id DESC
         LIMIT 1
       |eos}
+         node_name
 
   let select_block_trace =
     (block_trace_id ->! block_trace_with_block_id)
@@ -535,7 +556,8 @@ module Q = struct
       |eos}
 
   let base_block_traces_query =
-    {eos|
+    sprintf
+      {eos|
       SELECT
           bt.block_id,
           bt.source, bt.blockchain_length, bt.global_slot, bt.status,
@@ -549,7 +571,9 @@ module Q = struct
           FROM block_trace
           GROUP BY block_id
       ) sq ON bt.block_id = sq.block_id AND bt.execution_age = sq.min_execution_age
-    |eos}
+      WHERE bt.node_name = '%s'
+      |eos}
+      node_name
 
   let select_block_trace_info_entries_asc =
     (tup2 int int ->* block_trace_info)
@@ -580,7 +604,7 @@ module Q = struct
     (tup4 int int int int ->* block_trace_info)
     @@ base_block_traces_query
     ^ {eos|
-      WHERE bt.global_slot > $3 AND bt.global_slot <= $4
+        AND bt.global_slot > $3 AND bt.global_slot <= $4
       ORDER BY bt.block_trace_id ASC
       LIMIT $1
       OFFSET $2
@@ -590,7 +614,7 @@ module Q = struct
     (tup4 int int int int ->* block_trace_info)
     @@ base_block_traces_query
     ^ {eos|
-      WHERE bt.global_slot > $3 AND bt.global_slot <= $4
+        AND bt.global_slot > $3 AND bt.global_slot <= $4
       ORDER BY bt.block_trace_id DESC
       LIMIT $1
       OFFSET $2
@@ -607,7 +631,7 @@ module Q = struct
     (tup4 int int int int ->* block_trace_info)
     @@ base_block_traces_query
     ^ {eos|
-      WHERE bt.blockchain_length > $3 AND bt.blockchain_length <= $4
+        AND bt.blockchain_length > $3 AND bt.blockchain_length <= $4
       ORDER BY bt.block_trace_id ASC
       LIMIT $1
       OFFSET $2
@@ -617,7 +641,7 @@ module Q = struct
     (tup4 int int int int ->* block_trace_info)
     @@ base_block_traces_query
     ^ {eos|
-      WHERE bt.blockchain_length > $3 AND bt.blockchain_length <= $4
+        AND bt.blockchain_length > $3 AND bt.blockchain_length <= $4
       ORDER BY bt.block_trace_id DESC
       LIMIT $1
       OFFSET $2
@@ -657,13 +681,18 @@ module Q = struct
 
   let set_value =
     (tup2 string string ->. unit)
-      {eos|
-        INSERT INTO data (key, value) VALUES (?, ?)
+    @@ sprintf
+         {eos|
+        INSERT INTO data (key, node_name, value) VALUES (?, '%s', ?)
         ON CONFLICT (key) DO UPDATE SET value = excluded.value
       |eos}
+         node_name
 
   let get_value =
-    (string ->? string) {eos| SELECT value FROM data WHERE key = ? |eos}
+    (string ->? string)
+    @@ sprintf
+         {eos| SELECT value FROM data WHERE node_name = '%s' AND key = ? |eos}
+         node_name
 end
 
 let initialize_database (module Db : Caqti_async.CONNECTION) =
