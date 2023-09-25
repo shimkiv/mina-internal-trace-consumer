@@ -437,9 +437,9 @@ let serve =
      and main_trace_file_path =
        flag "--trace-file" ~aliases:[ "trace-file" ] (required string)
          ~doc:"Path to main internal trace file"
-     and db_path =
-       flag "--db-path" ~aliases:[ "db-path" ] (required string)
-         ~doc:"Persisted traces db"
+     and dburi =
+       flag "--db-uri" ~aliases:[ "db-uri" ] (required string)
+         ~doc:"Persisted traces URI"
      and process_rotated_files =
        flag "--process-rotated-files"
          ~aliases:[ "process-rotated-files" ]
@@ -453,7 +453,6 @@ let serve =
        add_filename_prefix main_trace_file_path ~prefix:"verifier-"
      in
      fun () ->
-       let dburi = "sqlite3://" ^ db_path in
        let dburi = Uri.of_string dburi in
        let pool = open_database_or_fail dburi in
        Connection_context.Db.set pool ;
@@ -507,9 +506,9 @@ let process =
     (let%map_open.Command main_trace_file_path =
        flag "--trace-file" ~aliases:[ "trace-file" ] (required string)
          ~doc:"Path to main internal trace file"
-     and db_path =
-       flag "--db-path" ~aliases:[ "db-path" ] (required string)
-         ~doc:"Persisted traces db"
+     and dburi =
+       flag "--db-uri" ~aliases:[ "db-uri" ] (required string)
+         ~doc:"Persisted traces URI"
      in
      let prover_trace_file_path =
        add_filename_prefix main_trace_file_path ~prefix:"prover-"
@@ -518,7 +517,6 @@ let process =
        add_filename_prefix main_trace_file_path ~prefix:"verifier-"
      in
      fun () ->
-       let dburi = "sqlite3://" ^ db_path in
        let dburi = Uri.of_string dburi in
        let pool = open_database_or_fail dburi in
        Connection_context.Db.set pool ;

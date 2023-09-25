@@ -411,13 +411,11 @@ module Q = struct
   let block_trace_checkpoint_with_trace_id =
     Caqti_type.(tup3 block_trace_id bool block_trace_checkpoint)
 
-  let initialize_schema_0 =
-    (unit ->. unit)
-      {eos|
-        BEGIN;
-
+  let initialize_schema () =
+    [ (unit ->. unit)
+        {eos|
         CREATE TABLE IF NOT EXISTS block_trace (
-          block_trace_id integer PRIMARY KEY AUTOINCREMENT,
+          block_trace_id SERIAL PRIMARY KEY,
           node_name text NOT NULL,
           execution_age integer NOT NULL DEFAULT 0,
           block_id text NOT NULL,
@@ -430,26 +428,26 @@ module Q = struct
           status text NOT NULL,
           metadata_json text NOT NULL
         );
-
+      |eos}
+    ; (unit ->. unit)
+        {eos|
         CREATE INDEX IF NOT EXISTS block_trace_block_id_idx
         ON block_trace (block_id);
-
+      |eos}
+    ; (unit ->. unit)
+        {eos|
         CREATE INDEX IF NOT EXISTS block_trace_node_name_idx
         ON block_trace (node_name);
-
+      |eos}
+    ; (unit ->. unit)
+        {eos|
         CREATE INDEX IF NOT EXISTS block_trace_execution_age_idx
         ON block_trace (execution_age);
-
-        COMMIT;
       |eos}
-
-  let initialize_schema_1 =
-    (unit ->. unit)
-      {eos|
-        BEGIN;
-
+    ; (unit ->. unit)
+        {eos|
         CREATE TABLE IF NOT EXISTS block_trace_checkpoint (
-          block_trace_checkpoint_id integer PRIMARY KEY AUTOINCREMENT,
+          block_trace_checkpoint_id SERIAL PRIMARY KEY,
           block_trace_id integer NOT NULL,
           source char NOT NULL, -- M = main, V = verifier, P = prover
           main_trace bool NOT NULL,
@@ -461,25 +459,26 @@ module Q = struct
 
           FOREIGN KEY (block_trace_id) REFERENCES block_trace(block_trace_id)
         );
-
+      |eos}
+    ; (unit ->. unit)
+        {eos|
         CREATE INDEX IF NOT EXISTS block_trace_checkpoint_source_idx
         ON block_trace_checkpoint (source);
-
+      |eos}
+    ; (unit ->. unit)
+        {eos|
         CREATE INDEX IF NOT EXISTS block_trace_checkpoint_main_trace_idx
         ON block_trace_checkpoint (main_trace);
-
-        COMMIT;
       |eos}
-
-  let initialize_schema_2 =
-    (unit ->. unit)
-      {eos|
+    ; (unit ->. unit)
+        {eos|
         CREATE TABLE IF NOT EXISTS data (
           key text PRIMARY KEY NOT NULL,
           node_name text NOT NULL,
           value text NOT NULL
         )
       |eos}
+    ]
 
   let increment_execution_age =
     (unit ->. unit)
@@ -697,9 +696,11 @@ end
 
 let initialize_database (module Db : Caqti_async.CONNECTION) =
   let open Deferred.Result.Let_syntax in
-  let%bind () = Db.exec Q.initialize_schema_0 () in
-  let%bind () = Db.exec Q.initialize_schema_1 () in
-  let%bind () = Db.exec Q.initialize_schema_2 () in
+  let%bind () =
+    Q.initialize_schema ()
+    |> Deferred.List.fold ~init:(Ok ()) ~f:(fun acc q ->
+           if Result.is_error acc then Deferred.return acc else Db.exec q () )
+  in
   Db.exec Q.increment_execution_age ()
 
 let initialize_database () = Connection_context.use_current initialize_database
