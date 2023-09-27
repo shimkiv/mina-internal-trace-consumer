@@ -38,7 +38,7 @@ struct Opts {
     #[structopt(short = "n", long, parse(from_os_str))]
     node_names_map: Option<PathBuf>,
     #[structopt(long)]
-    https: bool,
+    db_uri: Option<String>,
 }
 
 #[derive(Debug, StructOpt)]
@@ -243,7 +243,10 @@ impl Manager {
         let node_dir_name = node.construct_directory_name();
         let output_dir_path = self.opts.output_dir_path.join(node_dir_name);
         let main_trace_file_path = output_dir_path.join(trace_consumer::internal_trace_file::MAIN);
-        let db_path = output_dir_path.join("traces.db");
+        let db_uri = self.opts.db_uri.clone().unwrap_or_else(|| {
+            let db_path = output_dir_path.join("traces.db");
+            format!("sqlite3://{}", db_path.display())
+        });
 
         if !output_dir_path.exists() {
             std::fs::create_dir_all(&output_dir_path).context(format!(
@@ -289,8 +292,9 @@ impl Manager {
             let mut consumer = TraceConsumer::new(
                 consumer_executable_path,
                 main_trace_file_path,
-                db_path,
+                db_uri,
                 internal_trace_port,
+                node_id.clone(),
             );
             let mut consumer_handle = consumer.run().await.unwrap();
 

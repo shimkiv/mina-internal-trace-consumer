@@ -16,8 +16,9 @@ pub mod internal_trace_file {
 pub struct TraceConsumer {
     consumer_executable_path: PathBuf,
     main_trace_file_path: PathBuf,
-    db_path: PathBuf,
+    db_uri: String,
     graphql_port: u16,
+    node_identifier: String,
     // TODO: process handle here?
 }
 
@@ -25,14 +26,16 @@ impl TraceConsumer {
     pub fn new(
         consumer_executable_path: PathBuf,
         main_trace_file_path: PathBuf,
-        db_path: PathBuf,
+        db_uri: String,
         graphql_port: u16,
+        node_identifier: String,
     ) -> Self {
         Self {
             consumer_executable_path,
             main_trace_file_path,
-            db_path,
+            db_uri,
             graphql_port,
+            node_identifier,
         }
     }
 
@@ -54,11 +57,12 @@ impl TraceConsumer {
             .unwrap();
 
         let child = Command::new(&self.consumer_executable_path)
+            .env("MINA_NODE_NAME", &self.node_identifier)
             .arg("serve")
             .arg("--trace-file")
             .arg(&self.main_trace_file_path)
-            .arg("--db-path")
-            .arg(&self.db_path)
+            .arg("--db-uri")
+            .arg(&self.db_uri)
             .arg("--port")
             .arg(format!("{}", self.graphql_port))
             .stdout(stdout_log_file)
