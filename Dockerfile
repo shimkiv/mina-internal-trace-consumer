@@ -45,7 +45,7 @@ RUN env RUSTFLAGS="-C target-feature=-crt-static" cargo build --release
 FROM ${BASE_IMAGE}:${BASE_IMAGE_VERSION} AS app
 
 #RUN apk add --no-cache libgcc libstdc++ openssl sqlite-libs
-RUN apt-get update && apt-get install -y libssl3 libsqlite3-0 ca-certificates
+RUN apt-get update && apt-get install -y libssl3 libpq5 libsqlite3-0 ca-certificates
 
 COPY ./entrypoint.sh /entrypoint.sh
 COPY --from=rust-builder /app/target/release/internal-log-fetcher /internal_log_fetcher
