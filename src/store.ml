@@ -484,9 +484,11 @@ module Q = struct
     ; (unit ->. unit)
         {eos|
         CREATE TABLE IF NOT EXISTS data (
-          key varchar PRIMARY KEY NOT NULL,
+          key varchar NOT NULL,
           node_name varchar NOT NULL,
-          value text NOT NULL
+          value text NOT NULL,
+
+          PRIMARY KEY (key, node_name)
         )
       |eos}
     ]
@@ -694,7 +696,7 @@ module Q = struct
     @@ sprintf
          {eos|
         INSERT INTO data (key, node_name, value) VALUES (?, '%s', ?)
-        ON CONFLICT (key) DO UPDATE SET value = excluded.value
+        ON CONFLICT (key, node_name) DO UPDATE SET value = excluded.value
       |eos}
          node_name
 
