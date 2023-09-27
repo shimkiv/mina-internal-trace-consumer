@@ -15,7 +15,7 @@ ARG BUILD_IMAGE_VERSION=debian-12-ocaml-4.14
 FROM ${BUILD_IMAGE}:${BUILD_IMAGE_VERSION} AS builder
 
 #RUN sudo apk add linux-headers sqlite sqlite-dev
-RUN sudo apt-get update && sudo apt-get install -y pkg-config sqlite3 libsqlite3-dev
+RUN sudo apt-get update && sudo apt-get install -y pkg-config sqlite3 libsqlite3-dev libpq-dev
 COPY --chown=opam opam.export .
 RUN opam switch import --unlock-base opam.export
 
