@@ -412,12 +412,12 @@ module Q = struct
     Caqti_type.(tup3 block_trace_id bool block_trace_checkpoint)
 
   let initialize_schema (engine : [ `Sqlite | `Postgres ]) =
-    let primary_key_int =
+    let primary_key_int, json_type =
       match engine with
       | `Sqlite ->
-          "integer PRIMARY KEY AUTOINCREMENT"
+          "integer PRIMARY KEY AUTOINCREMENT", "text"
       | `Postgres ->
-          "SERIAL PRIMARY KEY"
+          "SERIAL PRIMARY KEY", "jsonb"
     in
     [ (unit ->. unit)
       @@ sprintf
@@ -434,10 +434,10 @@ module Q = struct
           blockchain_length int NOT NULL,
           global_slot int NOT NULL,
           status varchar NOT NULL,
-          metadata_json text NOT NULL
+          metadata_json %s NOT NULL
         )
       |eos}
-           primary_key_int
+           primary_key_int json_type
     ; (unit ->. unit)
         {eos|
         CREATE INDEX IF NOT EXISTS block_trace_block_id_idx
@@ -464,13 +464,13 @@ module Q = struct
           is_control bool NOT NULL,
           name varchar NOT NULL,
           started_at float NOT NULL,
-          metadata_json text,
+          metadata_json %s,
           call_id int NOT NULL,
 
           FOREIGN KEY (block_trace_id) REFERENCES block_trace(block_trace_id)
         )
       |eos}
-           primary_key_int
+           primary_key_int json_type
     ; (unit ->. unit)
         {eos|
         CREATE INDEX IF NOT EXISTS block_trace_checkpoint_source_idx
@@ -546,7 +546,7 @@ module Q = struct
           block_trace_id,
           trace_started_at, trace_completed_at, total_time,
           source, blockchain_length, global_slot, status,
-          metadata_json
+          CAST(metadata_json AS text) metadata_json
         FROM block_trace
         WHERE block_id = ?
           AND node_name = '%s'
@@ -562,7 +562,7 @@ module Q = struct
           block_id,
           trace_started_at, trace_completed_at, total_time,
           source, blockchain_length, global_slot, status,
-          metadata_json
+          CAST(metadata_json AS text) metadata_json
         FROM block_trace
         WHERE block_trace_id = ?
       |eos}
@@ -574,7 +574,7 @@ module Q = struct
           bt.block_id,
           bt.source, bt.blockchain_length, bt.global_slot, bt.status,
           bt.trace_started_at, bt.total_time,
-          bt.metadata_json
+          CAST(bt.metadata_json AS text) metadata_json
       FROM block_trace bt
       INNER JOIN (
           SELECT
@@ -685,7 +685,8 @@ module Q = struct
     (tup2 int bool ->* block_trace_checkpoint)
       {eos|
         SELECT
-          source, call_id, is_control, name, started_at, metadata_json
+          source, call_id, is_control, name, started_at,
+          CAST(metadata_json AS text) metadata_json
         FROM block_trace_checkpoint
         WHERE block_trace_id = ? AND main_trace = ?
         ORDER BY block_trace_checkpoint_id ASC
