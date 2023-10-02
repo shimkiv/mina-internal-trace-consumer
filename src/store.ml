@@ -334,7 +334,7 @@ module Q = struct
     in
     let rep =
       Caqti_type.(
-        tup3 (tup3 float float float) (tup4 string int int string) string )
+        tup3 (tup3 float float float) (tup4 string int int string) string)
     in
     custom ~encode ~decode rep
 
@@ -366,7 +366,7 @@ module Q = struct
     in
     let rep =
       Caqti_type.(
-        tup4 string (tup4 string int int string) (tup2 float float) string )
+        tup4 string (tup4 string int int string) (tup2 float float) string)
     in
     custom ~encode ~decode rep
 
@@ -394,7 +394,8 @@ module Q = struct
         | "P" ->
             `Prover
         | _ ->
-            `Main (* TODO print warning *)
+            `Main
+        (* TODO print warning *)
       in
       (* TODO: print warning on metadata decoding failure or fail row decoding *)
       let checkpoint =
@@ -415,9 +416,9 @@ module Q = struct
     let primary_key_int, json_type =
       match engine with
       | `Sqlite ->
-          "integer PRIMARY KEY AUTOINCREMENT", "text"
+          ("integer PRIMARY KEY AUTOINCREMENT", "text")
       | `Postgres ->
-          "SERIAL PRIMARY KEY", "jsonb"
+          ("SERIAL PRIMARY KEY", "jsonb")
     in
     [ (unit ->. unit)
       @@ sprintf
