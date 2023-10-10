@@ -1,10 +1,11 @@
 // Copyright (c) Viable Systems
 // SPDX-License-Identifier: Apache-2.0
 
+use std::env;
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
-use object_store::gcp::{GoogleCloudStorage, GoogleCloudStorageBuilder};
+use object_store::aws::{AmazonS3, AmazonS3Builder};
 use object_store::{path::Path, ObjectStore};
 use serde::Deserialize;
 use std::collections::HashSet;
@@ -27,19 +28,22 @@ pub struct DiscoveryParams {
 }
 
 pub struct DiscoveryService {
-    gcs: GoogleCloudStorage,
+    gcs: AmazonS3,
+    prefix: String,
 }
 
-fn offset_by_time(t: DateTime<Utc>) -> String {
+fn offset_by_time(prefix_str: String, t: DateTime<Utc>) -> String {
     let t_str = t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let d_str = t.format("%Y-%m-%d");
-    format!("submissions/{}/{}", d_str, t_str)
+    format!("{}/{}/{}", prefix_str, d_str, t_str)
 }
 
 impl DiscoveryService {
     pub fn try_new() -> Result<Self> {
-        let gcs = GoogleCloudStorageBuilder::from_env().build()?;
-        Ok(Self { gcs })
+        let prefix = env::var("AWS_PREFIX")?;
+        let bucket = env::var("AWS_BUCKET")?;
+        let gcs = AmazonS3Builder::from_env().with_bucket_name(bucket).build()?;
+        Ok(Self { gcs, prefix })
     }
 
     pub async fn discover_participants(
@@ -51,8 +55,10 @@ impl DiscoveryService {
         let before = Utc::now()
             - chrono::Duration::minutes(params.offset_min as i64)
             - chrono::Duration::seconds(30);
-        let offset: Path = offset_by_time(before).try_into()?;
-        let prefix: Path = "submissions".into();
+        let prefix_str = format!("{}/submissions", self.prefix);
+        let prefix_str2 = prefix_str.clone();
+        let offset: Path = offset_by_time(prefix_str, before).try_into()?;
+        let prefix: Path = prefix_str2.into();
         info!("Obtaining list of objects in bucket...");
         let it = self.gcs.list_with_offset(Some(&prefix), &offset).await?;
         let mut results = HashSet::new();
@@ -72,7 +78,8 @@ impl DiscoveryService {
             .collect();
 
         let futures = list_results.into_iter().map(|object_meta| async move {
-            let gcs = GoogleCloudStorageBuilder::from_env().build()?;
+            let bucket = env::var("AWS_BUCKET")?;
+            let gcs = AmazonS3Builder::from_env().with_bucket_name(bucket).build()?;
             let bytes = gcs
                 .get_range(&object_meta.location, 0..1_000_000_000)
                 .await?;
