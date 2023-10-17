@@ -467,6 +467,7 @@ module Q = struct
           started_at float NOT NULL,
           metadata_json %s,
           call_id int NOT NULL,
+          gossip bool not null default false,
 
           FOREIGN KEY (block_trace_id) REFERENCES block_trace(block_trace_id)
         )
@@ -689,7 +690,7 @@ module Q = struct
           source, call_id, is_control, name, started_at,
           CAST(metadata_json AS text) metadata_json
         FROM block_trace_checkpoint
-        WHERE block_trace_id = ? AND main_trace = ?
+        WHERE block_trace_id = ? AND main_trace = ? AND NOT gossip
         ORDER BY block_trace_checkpoint_id ASC
       |eos}
 
