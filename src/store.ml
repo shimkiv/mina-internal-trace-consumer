@@ -475,13 +475,9 @@ module Q = struct
            primary_key_int json_type
     ; (unit ->. unit)
         {eos|
-        CREATE INDEX IF NOT EXISTS block_trace_checkpoint_source_idx
-        ON block_trace_checkpoint (source)
-      |eos}
-    ; (unit ->. unit)
-        {eos|
-        CREATE INDEX IF NOT EXISTS block_trace_checkpoint_main_trace_idx
-        ON block_trace_checkpoint (main_trace)
+        CREATE INDEX IF NOT EXISTS block_trace_checkpoint_block_trace_id_main_trace_gossip
+        ON block_trace_checkpoint
+        (block_trace_id, main_trace) WHERE (NOT gossip)
       |eos}
     ; (unit ->. unit)
         {eos|
@@ -570,6 +566,7 @@ module Q = struct
       |eos}
 
   let base_block_traces_query =
+    (* TODO use window function instead of INNER JOIN *)
     sprintf
       {eos|
       SELECT
