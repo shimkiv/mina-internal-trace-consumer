@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::env;
-use anyhow::{anyhow, Result};
+use anyhow::{Result};
 use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
 use object_store::aws::{AmazonS3, AmazonS3Builder};
@@ -98,13 +98,9 @@ impl DiscoveryService {
         });
 
         for (location, meta) in gcs_results {
-            let colon_ix = meta.remote_addr.find(':').ok_or_else(|| {
-                anyhow!(
-                    "wrong remote address in submission {}: {}",
-                    location,
-                    meta.remote_addr
-                )
-            })?;
+            let colon_ix = meta.remote_addr.find(':').unwrap_or_else(|| {
+                meta.remote_addr.len()
+            });
             results.insert(NodeIdentity {
                 ip: meta.remote_addr[..colon_ix].to_string(),
                 graphql_port: meta.graphql_control_port,
