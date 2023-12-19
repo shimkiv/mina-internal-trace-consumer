@@ -426,7 +426,6 @@ module Q = struct
         CREATE TABLE IF NOT EXISTS block_trace (
           block_trace_id %s,
           node_name varchar NOT NULL,
-          execution_age integer NOT NULL DEFAULT 0,
           block_id varchar NOT NULL,
           trace_started_at float NOT NULL,
           trace_completed_at float,
@@ -448,11 +447,6 @@ module Q = struct
         {eos|
         CREATE INDEX IF NOT EXISTS block_trace_node_name_idx
         ON block_trace (node_name)
-      |eos}
-    ; (unit ->. unit)
-        {eos|
-        CREATE INDEX IF NOT EXISTS block_trace_execution_age_idx
-        ON block_trace (execution_age)
       |eos}
     ; (unit ->. unit)
       @@ sprintf
@@ -490,15 +484,6 @@ module Q = struct
         )
       |eos}
     ]
-
-  let increment_execution_age =
-    (unit ->. unit)
-    @@ sprintf
-         {eos|
-           UPDATE block_trace SET execution_age = execution_age + 1
-            WHERE node_name = '%s'
-         |eos}
-         node_name
 
   let add_block_trace =
     (block_trace_with_block_id ->! int)
@@ -548,7 +533,7 @@ module Q = struct
         FROM block_trace
         WHERE block_id = ?
           AND node_name = '%s'
-        ORDER BY execution_age ASC, block_trace_id DESC
+        ORDER BY block_trace_id DESC
         LIMIT 1
       |eos}
          node_name
@@ -575,13 +560,6 @@ module Q = struct
           bt.trace_started_at, bt.total_time,
           CAST(bt.metadata_json AS text) metadata_json
       FROM block_trace bt
-      INNER JOIN (
-          SELECT
-              block_id,
-              MIN(execution_age) AS min_execution_age
-          FROM block_trace
-          GROUP BY block_id
-      ) sq ON bt.block_id = sq.block_id AND bt.execution_age = sq.min_execution_age
       WHERE bt.node_name = '%s'
       |eos}
       node_name
@@ -709,12 +687,9 @@ end
 
 let initialize_database engine (module Db : Caqti_async.CONNECTION) =
   let open Deferred.Result.Let_syntax in
-  let%bind () =
-    Q.initialize_schema engine
-    |> Deferred.List.fold ~init:(Ok ()) ~f:(fun acc q ->
-           if Result.is_error acc then Deferred.return acc else Db.exec q () )
-  in
-  Db.exec Q.increment_execution_age ()
+  Q.initialize_schema engine
+  |> Deferred.List.fold ~init:(Ok ()) ~f:(fun acc q ->
+         if Result.is_error acc then Deferred.return acc else Db.exec q () )
 
 let initialize_database engine =
   Connection_context.use_current (initialize_database engine)
