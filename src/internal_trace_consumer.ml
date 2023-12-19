@@ -493,6 +493,10 @@ let serve =
          ~aliases:[ "process-rotated-files" ]
          (optional_with_default false bool)
          ~doc:"BOOL Process log-rotated files"
+     and initialize_schema =
+       flag "--init" ~aliases:[ "init" ]
+         (optional_with_default false bool)
+         ~doc:"BOOL Whether to initialize schema on start"
      in
      let prover_trace_file_path =
        add_filename_prefix main_trace_file_path ~prefix:"prover-"
@@ -504,8 +508,11 @@ let serve =
        let db_uri, engine = compute_engine_and_uri ~db_path ~db_uri in
        let%bind pool = open_database_or_fail db_uri in
        Connection_context.Db.set engine pool ;
-       let%bind result = Store.initialize_database engine in
-       let%bind () = abort_on_error result in
+       let%bind () =
+         if initialize_schema then
+           Store.initialize_database engine >>= abort_on_error
+         else Deferred.unit
+       in
        let insecure_rest_server = true in
        Log.Global.info "Starting server on port %d..." port ;
        let%bind () =
@@ -560,6 +567,10 @@ let process =
      and db_uri =
        flag "--db-uri" ~aliases:[ "db-uri" ] (optional string)
          ~doc:"URI Persisted traces database URI"
+     and initialize_schema =
+       flag "--init" ~aliases:[ "init" ]
+         (optional_with_default false bool)
+         ~doc:"BOOL Whether to initialize schema on start"
      in
      let prover_trace_file_path =
        add_filename_prefix main_trace_file_path ~prefix:"prover-"
@@ -571,8 +582,11 @@ let process =
        let db_uri, engine = compute_engine_and_uri ~db_path ~db_uri in
        let%bind pool = open_database_or_fail db_uri in
        Connection_context.Db.set engine pool ;
-       let%bind result = Store.initialize_database engine in
-       let%bind () = abort_on_error result in
+       let%bind () =
+         if initialize_schema then
+           Store.initialize_database engine >>= abort_on_error
+         else Deferred.unit
+       in
        Log.Global.info "Consuming main trace events from file: %s"
          main_trace_file_path ;
        Log.Global.info "Consuming prover trace events from file: %s"

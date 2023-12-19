@@ -686,7 +686,6 @@ module Q = struct
 end
 
 let initialize_database engine (module Db : Caqti_async.CONNECTION) =
-  let open Deferred.Result.Let_syntax in
   Q.initialize_schema engine
   |> Deferred.List.fold ~init:(Ok ()) ~f:(fun acc q ->
          if Result.is_error acc then Deferred.return acc else Db.exec q () )
