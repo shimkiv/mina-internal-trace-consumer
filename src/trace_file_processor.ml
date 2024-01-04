@@ -3,7 +3,8 @@ open Async
 module Block_tracing = Block_tracing
 
 module Make (Handler : sig
-  val process_checkpoint : string -> float -> unit Deferred.t
+  val process_checkpoint :
+    handle_status_change:bool -> string -> float -> unit Deferred.t
 
   val process_control :
        other:(string * Yojson.Safe.t) list
@@ -20,6 +21,8 @@ module Make (Handler : sig
 
   val complete_file_processing_iteration :
     [ `Postgres | `Sqlite ] -> unit Deferred.t
+end) (Context : sig
+  val handle_status_change : bool
 end) =
 struct
   let last_rotate_end_timestamp = ref 0.0
@@ -27,7 +30,11 @@ struct
   let process_event original yojson =
     match yojson with
     | `List [ `String checkpoint; `Float timestamp ] ->
-        let%map () = Handler.process_checkpoint checkpoint timestamp in
+        let%map () =
+          Handler.process_checkpoint
+            ~handle_status_change:Context.handle_status_change checkpoint
+            timestamp
+        in
         true
     | `Assoc [ ("rotated_log_end", `Float timestamp) ] ->
         last_rotate_end_timestamp := timestamp ;
@@ -174,7 +181,7 @@ struct
     Log.Global.info "Begin processing trace file: %s" filename ;
     loop false
 
-  let process_roated_files filename =
+  let process_rotated_files filename =
     Deferred.List.iter ~how:`Sequential (List.range 0 100) ~f:(fun n ->
         let filename_n = sprintf "%s.%d" filename n in
         try

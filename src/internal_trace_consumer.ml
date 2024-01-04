@@ -230,7 +230,7 @@ module Main_handler = struct
              !current_call_tag call_id !current_call_id ; *)
           `Other
 
-  let process_checkpoint checkpoint timestamp =
+  let process_checkpoint ~handle_status_change checkpoint timestamp =
     let action = checkpoint_recording_action () in
     match action with
     | `Skip ->
@@ -245,11 +245,13 @@ module Main_handler = struct
         let%map () =
           match target_trace with
           | `Main ->
-              let status = Block_tracing.compute_status checkpoint in
-              let%bind result =
-                Persistent_registry.handle_status_change trace_id status
+              let%bind () =
+                if handle_status_change then
+                  Block_tracing.compute_status checkpoint
+                  |> Persistent_registry.handle_status_change trace_id
+                  >>| show_result_error
+                else Deferred.unit
               in
-              show_result_error result ;
               let%bind result =
                 Persistent_registry.push_checkpoint trace_id ~is_main:true
                   ~source:`Main ~name:checkpoint ~timestamp ()
@@ -375,7 +377,7 @@ end
 module Prover_handler = struct
   let current_call_id = ref 0
 
-  let process_checkpoint checkpoint timestamp =
+  let process_checkpoint ~handle_status_change:_ checkpoint timestamp =
     push_pending_entry Pending.prover_entries !current_call_id
       (Pending.Checkpoint (checkpoint, timestamp))
 
@@ -402,7 +404,7 @@ end
 module Verifier_handler = struct
   let current_call_id = ref 0
 
-  let process_checkpoint checkpoint timestamp =
+  let process_checkpoint ~handle_status_change:_ checkpoint timestamp =
     push_pending_entry Pending.verifier_entries !current_call_id
       (Pending.Checkpoint (checkpoint, timestamp))
 
@@ -426,9 +428,21 @@ module Verifier_handler = struct
   let complete_file_processing_iteration _ = Deferred.unit
 end
 
-module Main_trace_processor = Trace_file_processor.Make (Main_handler)
-module Prover_trace_processor = Trace_file_processor.Make (Prover_handler)
-module Verifier_trace_processor = Trace_file_processor.Make (Verifier_handler)
+module Make_main_trace_processor = Trace_file_processor.Make (Main_handler)
+
+module Prover_trace_processor =
+  Trace_file_processor.Make
+    (Prover_handler)
+    (struct
+      let handle_status_change = false
+    end)
+
+module Verifier_trace_processor =
+  Trace_file_processor.Make
+    (Verifier_handler)
+    (struct
+      let handle_status_change = false
+    end)
 
 let add_filename_prefix original_path ~prefix =
   let open Filename in
@@ -497,6 +511,12 @@ let serve =
        flag "--init" ~aliases:[ "init" ]
          (optional_with_default false bool)
          ~doc:"BOOL Whether to initialize schema on start"
+     and handle_status_change =
+       flag "--handle-status-change"
+         (optional_with_default false bool)
+         ~doc:
+           "BOOL Whether to handle status change of block trace (and update \
+            distributions)"
      in
      let prover_trace_file_path =
        add_filename_prefix main_trace_file_path ~prefix:"prover-"
@@ -529,9 +549,12 @@ let serve =
          prover_trace_file_path ;
        Log.Global.info "Consuming verifier trace events from file: %s"
          verifier_trace_file_path ;
+       let module Main_trace_processor = Make_main_trace_processor (struct
+         let handle_status_change = handle_status_change
+       end) in
        let%bind () =
          if process_rotated_files then
-           Main_trace_processor.process_roated_files main_trace_file_path
+           Main_trace_processor.process_rotated_files main_trace_file_path
          else Deferred.unit
        in
        let%bind () = Main_trace_processor.process_file main_trace_file_path
@@ -539,7 +562,7 @@ let serve =
          let%bind () = Main_handler.synced () in
          let%bind () =
            if process_rotated_files then
-             Prover_trace_processor.process_roated_files prover_trace_file_path
+             Prover_trace_processor.process_rotated_files prover_trace_file_path
            else Deferred.unit
          in
          Prover_trace_processor.process_file prover_trace_file_path
@@ -547,7 +570,7 @@ let serve =
          let%bind () = Main_handler.synced () in
          let%bind () =
            if process_rotated_files then
-             Verifier_trace_processor.process_roated_files
+             Verifier_trace_processor.process_rotated_files
                verifier_trace_file_path
            else Deferred.unit
          in
@@ -571,6 +594,12 @@ let process =
        flag "--init" ~aliases:[ "init" ]
          (optional_with_default false bool)
          ~doc:"BOOL Whether to initialize schema on start"
+     and handle_status_change =
+       flag "--handle-status-change"
+         (optional_with_default false bool)
+         ~doc:
+           "BOOL Whether to handle status change of block trace (and update \
+            distributions)"
      in
      let prover_trace_file_path =
        add_filename_prefix main_trace_file_path ~prefix:"prover-"
@@ -595,6 +624,9 @@ let process =
          verifier_trace_file_path ;
        let without_rotation = true in
        let retry_open = false in
+       let module Main_trace_processor = Make_main_trace_processor (struct
+         let handle_status_change = handle_status_change
+       end) in
        let%bind () =
          Main_trace_processor.process_file ~without_rotation
            main_trace_file_path
