@@ -1,7 +1,6 @@
 // Copyright (c) Viable Systems
 // SPDX-License-Identifier: Apache-2.0
 
-use std::env;
 use crate::{
     authentication::{Authenticator, BasicAuthenticator, SequentialAuthenticator},
     graphql,
@@ -11,6 +10,7 @@ use crate::{
 use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose, Engine};
 use graphql_client::GraphQLQuery;
+use std::env;
 use std::{
     fs::File,
     io::Write,
@@ -246,7 +246,10 @@ impl MinaServer {
                     }
                 }
             }
-            let fetch_interval_ms = env::var("FETCH_INTERVAL_MS").ok().and_then(|s| s.parse::<u64>().ok()).unwrap_or_else(|| 10000);
+            let fetch_interval_ms = env::var("FETCH_INTERVAL_MS")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or_else(|| 10000);
 
             tokio::time::sleep(std::time::Duration::from_millis(fetch_interval_ms)).await;
         }

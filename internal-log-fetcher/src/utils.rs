@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use std::{
     collections::HashMap,
+    fmt,
     fs::{File, OpenOptions},
     path::{Path, PathBuf},
 };
@@ -25,13 +26,29 @@ where
     }
 }
 
-pub fn convert_timestamp_to_float(timestamp: &str) -> Result<f64, chrono::ParseError> {
-    let dt_naive: NaiveDateTime =
-        NaiveDateTime::parse_from_str(timestamp, "%Y-%m-%d %H:%M:%S%.fZ")?;
-    let dt_utc: DateTime<Utc> = DateTime::<Utc>::from_utc(dt_naive, Utc);
+// Define a custom error type.
+#[derive(Debug)]
+pub struct TsConversionError(String);
 
-    let duration_since_epoch = dt_utc.timestamp_nanos() as f64;
-    let float_value = duration_since_epoch / 1_000_000_000_f64;
+// Implement the Display trait for TsConversionError.
+impl fmt::Display for TsConversionError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+// Implement the Error trait for TsConversionError.
+impl std::error::Error for TsConversionError {}
+
+pub fn convert_timestamp_to_float(timestamp: &str) -> Result<f64, TsConversionError> {
+    let dt_naive: NaiveDateTime = NaiveDateTime::parse_from_str(timestamp, "%Y-%m-%d %H:%M:%S%.fZ")
+        .map_err(|e| TsConversionError(e.to_string()))?;
+    let dt_utc: DateTime<Utc> = DateTime::<Utc>::from_naive_utc_and_offset(dt_naive, Utc);
+
+    let duration_since_epoch = dt_utc
+        .timestamp_nanos_opt()
+        .ok_or(TsConversionError("conversion to nanos failed".to_string()))?;
+    let float_value = (duration_since_epoch as f64) / 1_000_000_000_f64;
 
     Ok(float_value)
 }

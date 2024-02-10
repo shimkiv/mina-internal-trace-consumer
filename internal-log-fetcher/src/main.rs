@@ -74,7 +74,6 @@ pub struct Manager {
     node_discovery: NodeDiscoveryMode,
     secret_key_base64: String,
     consumer_executable_path: String,
-    offset_min: u64,
     node_names: HashMap<String, String>,
 }
 
@@ -117,7 +116,6 @@ impl Manager {
             node_discovery,
             secret_key_base64,
             consumer_executable_path,
-            offset_min: 15,
             node_names,
         })
     }
@@ -127,13 +125,7 @@ impl Manager {
             NodeDiscoveryMode::Fixed(id) => Ok(HashSet::from_iter(vec![id.clone()].into_iter())),
             NodeDiscoveryMode::Discovery(discovery) => {
                 info!("Performing discovery...");
-                let participants = discovery
-                    .discover_participants(discovery::DiscoveryParams {
-                        offset_min: self.offset_min,
-                        limit: 10_000,
-                        only_block_producers: false,
-                    })
-                    .await?;
+                let participants = discovery.discover_participants().await?;
 
                 info!("Participants: {:?}", participants);
                 Ok(participants)
