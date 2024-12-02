@@ -41,7 +41,7 @@ struct Opts {
     db_uri: Option<String>,
     #[structopt(
         long,
-        about = "A list of template strings specifying host components to override within URLs provided by the Uptime backend service."
+        about = "A list of template strings specifying host components that will override the 'remote_addr' properties provided by the Uptime backend service."
     )]
     host_overrides: Option<Vec<String>>,
 }
