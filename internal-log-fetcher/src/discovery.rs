@@ -9,6 +9,7 @@ use object_store::{path::Path, ObjectStore};
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::env;
+use std::net::SocketAddr;
 use tracing::{info, warn};
 
 use crate::node::NodeIdentity;
@@ -69,10 +70,20 @@ fn new_node_identity(
             }
         }
     }
-    NodeIdentity {
-        ip: remote_addr.to_string(),
-        graphql_port: control_port,
-        submitter_pk: Some(submitter),
+
+    if let Ok(socket_addr) = remote_addr.parse::<SocketAddr>() {
+        NodeIdentity {
+            ip: socket_addr.ip().to_string(),
+            graphql_port: control_port,
+            submitter_pk: Some(submitter),
+        }
+    } else {
+        // Fallback in case parsing fails
+        NodeIdentity {
+            ip: remote_addr.to_string(),
+            graphql_port: control_port,
+            submitter_pk: Some(submitter),
+        }
     }
 }
 
@@ -143,12 +154,13 @@ async fn discover_aws(aws: &AwsConfig) -> Result<HashSet<NodeIdentity>> {
     });
 
     for (_, meta) in aws_results {
-        let colon_ix = meta.remote_addr.find(':').unwrap_or(meta.remote_addr.len());
-        results.insert(NodeIdentity {
-            ip: meta.remote_addr[..colon_ix].to_string(),
-            graphql_port: meta.graphql_control_port,
-            submitter_pk: Some(meta.submitter),
-        });
+        let node = new_node_identity(
+            &meta.remote_addr,
+            meta.graphql_control_port,
+            meta.submitter.clone(),
+            None,
+        );
+        results.insert(node);
     }
 
     Ok(results)
