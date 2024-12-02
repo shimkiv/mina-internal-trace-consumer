@@ -126,7 +126,10 @@ pub async fn fetch_online(
     Ok(results)
 }
 
-async fn discover_aws(aws: &AwsConfig) -> Result<HashSet<NodeIdentity>> {
+async fn discover_aws(
+    aws: &AwsConfig,
+    host_overrides: Option<&[String]>,
+) -> Result<HashSet<NodeIdentity>> {
     let before = Utc::now() - chrono::Duration::minutes(20);
     let prefix_str = format!("{}/submissions", aws.prefix);
     let prefix_str2 = prefix_str.clone();
@@ -174,7 +177,7 @@ async fn discover_aws(aws: &AwsConfig) -> Result<HashSet<NodeIdentity>> {
             &meta.remote_addr,
             meta.graphql_control_port,
             meta.submitter.clone(),
-            None,
+            host_overrides,
         );
         results.insert(node);
     }
@@ -198,7 +201,7 @@ impl DiscoveryService {
         host_overrides: Option<Vec<String>>,
     ) -> Result<HashSet<NodeIdentity>> {
         match &self.aws {
-            Some(aws) => discover_aws(aws).await,
+            Some(aws) => discover_aws(aws, host_overrides.as_deref()).await,
             None => match &self.online_url {
                 Some(url) => fetch_online(url, host_overrides.as_deref()).await,
                 None => panic!("neither aws nor online url configured"),
