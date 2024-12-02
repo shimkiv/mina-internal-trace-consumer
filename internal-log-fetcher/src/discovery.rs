@@ -59,8 +59,8 @@ fn node_identity(
         let index = (control_port / 10000) as usize - 1;
         if let Some(overrides) = url_overrides {
             if let Some(url_template) = overrides.get(index) {
-                let port_suffix = control_port % 10000;
-                let ip = url_template.replace("{}", &port_suffix.to_string());
+                let template_value = control_port % 10000;
+                let ip = url_template.replace("{}", &template_value.to_string());
                 return NodeIdentity {
                     ip,
                     graphql_port: 80,
