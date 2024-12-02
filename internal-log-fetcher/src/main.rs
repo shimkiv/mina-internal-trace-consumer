@@ -26,7 +26,7 @@ mod rpc;
 mod trace_consumer;
 mod utils;
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, StructOpt, Clone)]
 #[structopt(about = "Internal logging fetcher.")]
 struct Opts {
     #[structopt(subcommand)]
@@ -39,9 +39,11 @@ struct Opts {
     node_names_map: Option<PathBuf>,
     #[structopt(long)]
     db_uri: Option<String>,
+    #[structopt(long)]
+    url_overrides: Option<Vec<String>>,
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, StructOpt, Clone)]
 enum Target {
     #[structopt(about = "Specify Node address and port separately")]
     NodeAddressPort {
@@ -120,12 +122,15 @@ impl Manager {
         })
     }
 
-    async fn discover(&mut self) -> Result<HashSet<NodeIdentity>> {
+    async fn discover(
+        &mut self,
+        url_overrides: Option<Vec<String>>,
+    ) -> Result<HashSet<NodeIdentity>> {
         match &mut self.node_discovery {
             NodeDiscoveryMode::Fixed(id) => Ok(HashSet::from_iter(vec![id.clone()].into_iter())),
             NodeDiscoveryMode::Discovery(discovery) => {
                 info!("Performing discovery...");
-                let participants = discovery.discover_participants().await?;
+                let participants = discovery.discover_participants(url_overrides).await?;
 
                 info!("Participants: {:?}", participants);
                 Ok(participants)
@@ -133,8 +138,8 @@ impl Manager {
         }
     }
 
-    async fn update_nodes(&mut self) -> Result<()> {
-        let current_uptime_nodes = self.discover().await?;
+    async fn update_nodes(&mut self, opts: Opts) -> Result<()> {
+        let current_uptime_nodes = self.discover(opts.url_overrides).await?;
         let uptime_nodes = HashSet::from_iter(current_uptime_nodes.iter());
         let known_nodes = HashSet::from_iter(self.nodes.keys().cloned());
         let new_nodes = current_uptime_nodes.difference(&known_nodes);
@@ -372,7 +377,7 @@ async fn main() -> Result<()> {
         .unwrap_or(opts.output_dir_path);
     info!("Output dir path: {}", opts.output_dir_path.display());
 
-    let shared_manager = SharedManager(Arc::new(RwLock::new(Manager::try_new(opts)?)));
+    let shared_manager = SharedManager(Arc::new(RwLock::new(Manager::try_new(opts.clone())?)));
 
     let rest_port = 4000;
     info!("Spawning REST API server at port {rest_port}");
@@ -384,7 +389,7 @@ async fn main() -> Result<()> {
         loop {
             {
                 let mut manager = shared_manager.0.write().await;
-                if let Err(error) = manager.update_nodes().await {
+                if let Err(error) = manager.update_nodes(opts.clone()).await {
                     error!("Failure when updating list of nodes: {error}");
                 }
             }
@@ -407,4 +412,113 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use discovery::fetch_online;
+    use httpmock::prelude::*;
+    use std::collections::HashSet;
+
+    #[tokio::test]
+    async fn test_fetch_online() -> Result<(), Box<dyn std::error::Error>> {
+        // Start a lightweight mock server
+        let server = MockServer::start();
+
+        // Define the mock response data
+        let mock_data = r#"
+        [
+            {
+                "remote_addr": "10.233.79.128",
+                "submitter": "B62qrUVQNh2K7e7LgepVt2ireCDdDxTL2QVxy4Mda4yZKHCz7R2bWYz",
+                "graphql_control_port": 10001
+            },
+            {
+                "remote_addr": "10.233.88.128",
+                "submitter": "B62qrTP88hjyU3hq6QNvFafX8sgHrsAW6v7tt5twrcugJM4bBV2eu9k",
+                "graphql_control_port": 10002
+            },
+            {
+                "remote_addr": "10.233.81.0",
+                "submitter": "B62qnKweK4BVxG7TA1VzhNr6GcTejXbrN6ycEQiW4ZgUCxHuWTQta4i",
+                "graphql_control_port": 20002
+            },
+            {
+                "remote_addr": "10.233.122.192",
+                "submitter": "B62qiegMPgDmFa28VFUs2UMoPEk5X3hSsWBsasa8t627bc26kg3C5k3",
+                "graphql_control_port": 40001
+            },
+            {
+                "remote_addr": "10.233.88.128",
+                "submitter": "B62qjRMUQStdTQwkBLqAXVL3XKSZJCS3g5JGwKnMtszjnBwZhQHqwcz",
+                "graphql_control_port": 20001
+            }
+        ]
+        "#;
+
+        // Create a mock on the server
+        let _mock = server.mock(|when, then| {
+            when.method(GET).path("/v1/online");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(mock_data);
+        });
+
+        // Define URL overrides
+        let url_overrides = Some(vec![
+            "plain-{}.hetzner-itn.gcp.o1test.net".to_string(),
+            "another-{}.example.com".to_string(),
+        ]);
+
+        // Call the fetch_online function with the mock server URL
+        let online_nodes =
+            fetch_online(&server.url("/v1/online"), url_overrides.as_deref()).await?;
+
+        // Define the expected set of NodeIdentity instances
+        let expected_nodes: HashSet<NodeIdentity> = vec![
+            NodeIdentity {
+                ip: "plain-1.hetzner-itn.gcp.o1test.net".to_string(),
+                graphql_port: 80,
+                submitter_pk: Some(
+                    "B62qrUVQNh2K7e7LgepVt2ireCDdDxTL2QVxy4Mda4yZKHCz7R2bWYz".to_string(),
+                ),
+            },
+            NodeIdentity {
+                ip: "plain-2.hetzner-itn.gcp.o1test.net".to_string(),
+                graphql_port: 80,
+                submitter_pk: Some(
+                    "B62qrTP88hjyU3hq6QNvFafX8sgHrsAW6v7tt5twrcugJM4bBV2eu9k".to_string(),
+                ),
+            },
+            NodeIdentity {
+                ip: "another-2.example.com".to_string(),
+                graphql_port: 80,
+                submitter_pk: Some(
+                    "B62qnKweK4BVxG7TA1VzhNr6GcTejXbrN6ycEQiW4ZgUCxHuWTQta4i".to_string(),
+                ),
+            },
+            NodeIdentity {
+                ip: "10.233.122.192".to_string(),
+                graphql_port: 40001,
+                submitter_pk: Some(
+                    "B62qiegMPgDmFa28VFUs2UMoPEk5X3hSsWBsasa8t627bc26kg3C5k3".to_string(),
+                ),
+            },
+            NodeIdentity {
+                ip: "another-1.example.com".to_string(),
+                graphql_port: 80,
+                submitter_pk: Some(
+                    "B62qjRMUQStdTQwkBLqAXVL3XKSZJCS3g5JGwKnMtszjnBwZhQHqwcz".to_string(),
+                ),
+            },
+        ]
+        .into_iter()
+        .collect();
+
+        // Assert that the fetched nodes match the expected nodes
+        assert_eq!(online_nodes, expected_nodes);
+
+        Ok(())
+    }
 }

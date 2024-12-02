@@ -42,18 +42,45 @@ fn new_from_aws() -> Result<DiscoveryService> {
     let s3 = AmazonS3Builder::from_env()
         .with_bucket_name(bucket)
         .build()?;
-    let aws = AwsConfig {
-        s3: s3,
-        prefix: prefix,
-    };
+    let aws = AwsConfig { s3, prefix };
     Ok(DiscoveryService {
         aws: Some(aws),
         online_url: None,
     })
 }
 
-async fn fetch_online(url: &str) -> Result<HashSet<NodeIdentity>> {
-    // Use reqwest to make an async GET request.
+fn node_identity(
+    remote_addr: &str,
+    control_port: u16,
+    submitter: String,
+    url_overrides: Option<&[String]>,
+) -> NodeIdentity {
+    if control_port >= 10000 {
+        let index = (control_port / 10000) as usize - 1;
+        if let Some(overrides) = url_overrides {
+            if let Some(url_template) = overrides.get(index) {
+                let port_suffix = control_port % 10000;
+                let ip = url_template.replace("{}", &port_suffix.to_string());
+                return NodeIdentity {
+                    ip,
+                    graphql_port: 80,
+                    submitter_pk: Some(submitter),
+                };
+            }
+        }
+    }
+    NodeIdentity {
+        ip: remote_addr.to_string(),
+        graphql_port: control_port,
+        submitter_pk: Some(submitter),
+    }
+}
+
+pub async fn fetch_online(
+    url: &str,
+    url_overrides: Option<&[String]>,
+) -> Result<HashSet<NodeIdentity>> {
+    // Use "reqwest" to make an async GET request.
     let response = reqwest::get(url).await?;
 
     // Deserialize the JSON response into Vec<Meta>.
@@ -61,11 +88,13 @@ async fn fetch_online(url: &str) -> Result<HashSet<NodeIdentity>> {
 
     let mut results = HashSet::new();
     for meta in meta_array {
-        results.insert(NodeIdentity {
-            ip: meta.remote_addr.to_string(),
-            graphql_port: meta.graphql_control_port,
-            submitter_pk: Some(meta.submitter),
-        });
+        let node = node_identity(
+            &meta.remote_addr,
+            meta.graphql_control_port,
+            meta.submitter.clone(),
+            url_overrides,
+        );
+        results.insert(node);
     }
 
     Ok(results)
@@ -115,10 +144,7 @@ async fn discover_aws(aws: &AwsConfig) -> Result<HashSet<NodeIdentity>> {
     });
 
     for (_, meta) in aws_results {
-        let colon_ix = meta
-            .remote_addr
-            .find(':')
-            .unwrap_or_else(|| meta.remote_addr.len());
+        let colon_ix = meta.remote_addr.find(':').unwrap_or(meta.remote_addr.len());
         results.insert(NodeIdentity {
             ip: meta.remote_addr[..colon_ix].to_string(),
             graphql_port: meta.graphql_control_port,
@@ -140,11 +166,14 @@ impl DiscoveryService {
         }
     }
 
-    pub async fn discover_participants(&self) -> Result<HashSet<NodeIdentity>> {
+    pub async fn discover_participants(
+        &self,
+        url_overrides: Option<Vec<String>>,
+    ) -> Result<HashSet<NodeIdentity>> {
         match &self.aws {
-            Some(aws) => discover_aws(&aws).await,
+            Some(aws) => discover_aws(aws).await,
             None => match &self.online_url {
-                Some(url) => fetch_online(&url).await,
+                Some(url) => fetch_online(url, url_overrides.as_deref()).await,
                 None => panic!("neither aws nor online url configured"),
             },
         }
