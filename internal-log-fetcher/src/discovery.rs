@@ -49,15 +49,15 @@ fn new_from_aws() -> Result<DiscoveryService> {
     })
 }
 
-fn node_identity(
+fn new_node_identity(
     remote_addr: &str,
     control_port: u16,
     submitter: String,
-    url_overrides: Option<&[String]>,
+    host_overrides: Option<&[String]>,
 ) -> NodeIdentity {
     if control_port >= 10000 {
         let index = (control_port / 10000) as usize - 1;
-        if let Some(overrides) = url_overrides {
+        if let Some(overrides) = host_overrides {
             if let Some(url_template) = overrides.get(index) {
                 let port_suffix = control_port % 10000;
                 let ip = url_template.replace("{}", &port_suffix.to_string());
@@ -78,21 +78,20 @@ fn node_identity(
 
 pub async fn fetch_online(
     url: &str,
-    url_overrides: Option<&[String]>,
+    host_overrides: Option<&[String]>,
 ) -> Result<HashSet<NodeIdentity>> {
     // Use "reqwest" to make an async GET request.
     let response = reqwest::get(url).await?;
-
     // Deserialize the JSON response into Vec<Meta>.
     let meta_array = response.json::<Vec<MetaToBeSaved>>().await?;
-
     let mut results = HashSet::new();
+
     for meta in meta_array {
-        let node = node_identity(
+        let node = new_node_identity(
             &meta.remote_addr,
             meta.graphql_control_port,
             meta.submitter.clone(),
-            url_overrides,
+            host_overrides,
         );
         results.insert(node);
     }
@@ -168,12 +167,12 @@ impl DiscoveryService {
 
     pub async fn discover_participants(
         &self,
-        url_overrides: Option<Vec<String>>,
+        host_overrides: Option<Vec<String>>,
     ) -> Result<HashSet<NodeIdentity>> {
         match &self.aws {
             Some(aws) => discover_aws(aws).await,
             None => match &self.online_url {
-                Some(url) => fetch_online(url, url_overrides.as_deref()).await,
+                Some(url) => fetch_online(url, host_overrides.as_deref()).await,
                 None => panic!("neither aws nor online url configured"),
             },
         }

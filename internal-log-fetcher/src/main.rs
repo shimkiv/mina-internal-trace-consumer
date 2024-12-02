@@ -39,8 +39,11 @@ struct Opts {
     node_names_map: Option<PathBuf>,
     #[structopt(long)]
     db_uri: Option<String>,
-    #[structopt(long)]
-    url_overrides: Option<Vec<String>>,
+    #[structopt(
+        long,
+        about = "A list of template strings specifying host components to override within URLs provided by the Uptime backend service."
+    )]
+    host_overrides: Option<Vec<String>>,
 }
 
 #[derive(Debug, StructOpt, Clone)]
@@ -124,13 +127,13 @@ impl Manager {
 
     async fn discover(
         &mut self,
-        url_overrides: Option<Vec<String>>,
+        host_overrides: Option<Vec<String>>,
     ) -> Result<HashSet<NodeIdentity>> {
         match &mut self.node_discovery {
             NodeDiscoveryMode::Fixed(id) => Ok(HashSet::from_iter(vec![id.clone()].into_iter())),
             NodeDiscoveryMode::Discovery(discovery) => {
                 info!("Performing discovery...");
-                let participants = discovery.discover_participants(url_overrides).await?;
+                let participants = discovery.discover_participants(host_overrides).await?;
 
                 info!("Participants: {:?}", participants);
                 Ok(participants)
@@ -139,7 +142,7 @@ impl Manager {
     }
 
     async fn update_nodes(&mut self, opts: Opts) -> Result<()> {
-        let current_uptime_nodes = self.discover(opts.url_overrides).await?;
+        let current_uptime_nodes = self.discover(opts.host_overrides).await?;
         let uptime_nodes = HashSet::from_iter(current_uptime_nodes.iter());
         let known_nodes = HashSet::from_iter(self.nodes.keys().cloned());
         let new_nodes = current_uptime_nodes.difference(&known_nodes);
@@ -466,14 +469,14 @@ mod tests {
         });
 
         // Define URL overrides
-        let url_overrides = Some(vec![
+        let host_overrides = Some(vec![
             "plain-{}.hetzner-itn.gcp.o1test.net".to_string(),
             "another-{}.example.com".to_string(),
         ]);
 
         // Call the fetch_online function with the mock server URL
         let online_nodes =
-            fetch_online(&server.url("/v1/online"), url_overrides.as_deref()).await?;
+            fetch_online(&server.url("/v1/online"), host_overrides.as_deref()).await?;
 
         // Define the expected set of NodeIdentity instances
         let expected_nodes: HashSet<NodeIdentity> = vec![
