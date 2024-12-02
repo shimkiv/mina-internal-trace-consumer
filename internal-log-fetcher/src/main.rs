@@ -428,7 +428,6 @@ mod tests {
     async fn test_fetch_online() -> Result<(), Box<dyn std::error::Error>> {
         // Start a lightweight mock server
         let server = MockServer::start();
-
         // Define the mock response data
         let mock_data = r#"
         [
@@ -459,7 +458,6 @@ mod tests {
             }
         ]
         "#;
-
         // Create a mock on the server
         let _mock = server.mock(|when, then| {
             when.method(GET).path("/v1/online");
@@ -467,17 +465,14 @@ mod tests {
                 .header("content-type", "application/json")
                 .body(mock_data);
         });
-
         // Define URL overrides
         let host_overrides = Some(vec![
             "plain-{}.hetzner-itn.gcp.o1test.net".to_string(),
             "another-{}.example.com".to_string(),
         ]);
-
         // Call the fetch_online function with the mock server URL
         let online_nodes =
             fetch_online(&server.url("/v1/online"), host_overrides.as_deref()).await?;
-
         // Define the expected set of NodeIdentity instances
         let expected_nodes: HashSet<NodeIdentity> = vec![
             NodeIdentity {
@@ -518,10 +513,8 @@ mod tests {
         ]
         .into_iter()
         .collect();
-
         // Assert that the fetched nodes match the expected nodes
         assert_eq!(online_nodes, expected_nodes);
-
         Ok(())
     }
 }

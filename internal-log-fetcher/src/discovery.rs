@@ -50,18 +50,33 @@ fn new_from_aws() -> Result<DiscoveryService> {
     })
 }
 
+/// Constructs a `NodeIdentity` based on the provided parameters.
+///
+/// - `remote_addr`: The remote address as a string.
+/// - `control_port`: The node GraphQL control port number.
+/// - `submitter`: Submitter's public key.
+/// - `host_overrides`: An optional list of template strings for host addresses overriding.
+///
+/// Returns a `NodeIdentity` struct.
 fn new_node_identity(
     remote_addr: &str,
     control_port: u16,
     submitter: String,
     host_overrides: Option<&[String]>,
 ) -> NodeIdentity {
+    // In certain environment configurations, we want to override the host components
+    // of online fetched remote addresses with provided host override templates.
+    // Please refer to the main.rs::test_fetch_online() test for an example.
     if control_port >= 10000 {
+        // The control port is in the format of 10000 + index.
         let index = (control_port / 10000) as usize - 1;
         if let Some(overrides) = host_overrides {
+            // Check if the index is within the bounds of the provided host overrides.
             if let Some(url_template) = overrides.get(index) {
+                // Replace the placeholder "{}" with the control port modulo 10000.
                 let template_value = control_port % 10000;
                 let ip = url_template.replace("{}", &template_value.to_string());
+                // Return the NodeIdentity with the overridden host and default port 80.
                 return NodeIdentity {
                     ip,
                     graphql_port: 80,
@@ -71,6 +86,7 @@ fn new_node_identity(
         }
     }
 
+    // Try to parse the remote address as a socket address (AWS case).
     if let Ok(socket_addr) = remote_addr.parse::<SocketAddr>() {
         NodeIdentity {
             ip: socket_addr.ip().to_string(),
@@ -78,7 +94,7 @@ fn new_node_identity(
             submitter_pk: Some(submitter),
         }
     } else {
-        // Fallback in case parsing fails
+        // Fallback in case parsing fails.
         NodeIdentity {
             ip: remote_addr.to_string(),
             graphql_port: control_port,
