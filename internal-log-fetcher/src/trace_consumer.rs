@@ -44,14 +44,12 @@ impl TraceConsumer {
 
         let stdout_log_file = OpenOptions::new()
             .create(true)
-            .write(true)
             .append(true)
             .open(base_path.join("consumer-stdout.log"))
             .unwrap();
 
         let stderr_log_file = OpenOptions::new()
             .create(true)
-            .write(true)
             .append(true)
             .open(base_path.join("consumer-stderr.log"))
             .unwrap();
